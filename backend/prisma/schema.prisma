@@ -1,0 +1,95 @@
+// DURGA - Dynamic Urban Rescue & Guidance Architecture
+// Prisma Database Schema for PostgreSQL
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Scenario {
+  id                String               @id @default(cuid())
+  name              String
+  description       String?              @db.Text
+  emergencyType     String               // e.g. "Fire", "Flood", "Earthquake", "Chemical Leak"
+  emergencyLocation String               // e.g. "B01", "EZ02", "J07", "B16"
+  peopleAffected    Int                  @default(0)
+  riskLevel         String               @default("CRITICAL") // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  // Relational children with Cascade deletion
+  emergencies       Emergency[]
+  algorithmResults  AlgorithmResult[]
+  evacuationPlans   EvacuationPlan[]
+  resourceAllocations ResourceAllocation[]
+
+  @@map("scenarios")
+}
+
+model Emergency {
+  id          String   @id @default(cuid())
+  scenarioId  String
+  type        String
+  location    String
+  riskLevel   String
+  createdAt   DateTime @default(now())
+
+  scenario    Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("emergencies")
+}
+
+model AlgorithmResult {
+  id              String   @id @default(cuid())
+  scenarioId      String
+  algorithmName   String   // "Dijkstra", "Floyd-Warshall", "Greedy", "Dynamic Programming", "Kruskal", "Prim"
+  executionTime   Float    // Execution time in milliseconds
+  nodesVisited    Int
+  edgesProcessed  Int
+  resultCost      Float
+  spaceComplexity String
+  timeComplexity  String
+  createdAt       DateTime @default(now())
+
+  scenario        Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("algorithm_results")
+}
+
+model EvacuationPlan {
+  id              String   @id @default(cuid())
+  scenarioId      String
+  primaryExit     String   // e.g. "EX01"
+  secondaryExit   String?  // e.g. "EX02"
+  totalDistance   Float    // Physical distance in meters
+  estimatedTime   Float    // Estimated clearance/travel time in seconds
+  peopleEvacuated Int
+  routeData       Json?    // Relational route sequence & tactical checkpoints
+  createdAt       DateTime @default(now())
+
+  scenario        Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("evacuation_plans")
+}
+
+model ResourceAllocation {
+  id             String   @id @default(cuid())
+  scenarioId     String
+  resourceType   String   // "Ambulances", "Rescue Teams", "Emergency Vehicles"
+  totalAvailable Int
+  totalUsed      Int
+  benefitScore   Float?   // DP optimized benefit score
+  createdAt      DateTime @default(now())
+
+  scenario       Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@index([scenarioId])
+  @@map("resource_allocations")
+}
