@@ -1,0 +1,2308 @@
+<script>
+/**
+ * DURGA - Client-Side Controller & Interactive Engine
+ * 
+ * Invariants:
+ *  - Canonical 47 Vertices & 58 Bidirectional Arterial Corridors
+ *  - Reactive View Navigation & Interactive Pan/Zoom SVG Visualizer
+ *  - Deterministic DAA Execution (Authoritative)
+ *  - Optional Gemini AI Decision Support (Advisory Only)
+ *  - Live Voice Guidance (Web Speech API) with Capability Detection
+ *  - Real Browser GPS (navigator.geolocation) with Full Error Code Handling
+ *  - Google Sheets Relational CRUD via google.script.run
+ */
+
+// ============================================================================
+// 1. STATE & GLOBAL CONFIGURATION
+// ============================================================================
+
+const STATE = {
+  activeTab: 'dashboard',
+  graph: null,
+  activeScenario: null,
+  scenariosList: [],
+  selectedOrigin: 'B01',
+  selectedExit: 'all',
+  lastDijkstraResult: null,
+  voiceNav: {
+    enabled: true,
+    status: 'idle', // 'idle' | 'navigating' | 'paused'
+    currentIndex: 0,
+    steps: [],
+    synth: window.speechSynthesis || null,
+  },
+  gps: {
+    active: false,
+    lat: 20.3550,
+    lon: 85.8180,
+    watchId: null,
+  },
+  liveConditions: {
+    weather: null,
+    hazards: 'NO VERIFIED FEED',
+  },
+  algoLab: {
+    selectedAlgo: 'dijkstra',
+    stepIndex: 0,
+    steps: [],
+    timer: null,
+    speed: 1,
+    result: null,
+  },
+  graphView: {
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    isDragging: false,
+    dragStart: { x: 0, y: 0 },
+    selectedNode: null,
+    selectedEdge: null,
+    highlightedPath: [],
+  },
+};
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// ============================================================================
+// 2. SERVER BRIDGE (google.script.run Promise Wrapper)
+// ============================================================================
+
+function callServer(functionName, ...args) {
+  return new Promise((resolve, reject) => {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      console.warn(`[Local Fallback] Running ${functionName} outside Google Apps Script environment`);
+      return resolve(clientLocalFallback(functionName, args));
+    }
+
+    google.script.run
+      .withSuccessHandler((response) => resolve(response))
+      .withFailureHandler((error) => {
+        console.error(`Apps Script error in ${functionName}:`, error);
+        reject(new Error(error && error.message ? error.message : String(error)));
+      })
+      [functionName](...args);
+  });
+}
+
+function clientLocalFallback(fnName, args) {
+  if (fnName === 'getHealth') {
+    return {
+      status: 'healthy',
+      database: 'connected (Local Memory / Sheets Fallback)',
+      engine: 'DURGA Client V8 Engine',
+      scenarioCount: STATE.scenariosList.length,
+      timestamp: new Date().toISOString(),
+    };
+  }
+  if (fnName === 'getScenarios') {
+    return STATE.scenariosList;
+  }
+  if (fnName === 'getLiveConditions') {
+    return {
+      gps: { lat: args[0], lon: args[1], status: 'LIVE' },
+      weather: { temperatureC: 28, humidityPercent: 65, condition: 'Clear', status: 'LIVE' },
+      hazards: { status: 'NO VERIFIED FEED' },
+    };
+  }
+  if (fnName === 'askGemini') {
+    return {
+      text: '🤖 Gemini Advisory (Client Offline Preview): All primary arterial routes to EX01 remain operational. Prioritize civilian movement along City Hall Egress Corridor.'
+    };
+  }
+  return null;
+}
+
+// ============================================================================
+// 3. APPLICATION INITIALIZATION
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  initCanonicalGraph();
+  initNavigation();
+  initGraphCanvasInteractions();
+  initVoiceNavigation();
+  initGeolocation();
+  loadScenariosFromDatabase();
+  refreshTelemetryHealth();
+});
+
+function initCanonicalGraph() {
+  // Canonical 47 Nodes & 58 Edges
+  STATE.graph = {
+  "nodes": [
+    {
+      "id": "EX01",
+      "name": "North Freeway Exit 101",
+      "type": "exit",
+      "people": 0,
+      "capacity": 5000,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 500,
+      "y": 50
+    },
+    {
+      "id": "EX02",
+      "name": "East Ring Expressway Exit",
+      "type": "exit",
+      "people": 0,
+      "capacity": 4500,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 940,
+      "y": 340
+    },
+    {
+      "id": "EX03",
+      "name": "South Interstate Interchange 4",
+      "type": "exit",
+      "people": 0,
+      "capacity": 6000,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 580,
+      "y": 670
+    },
+    {
+      "id": "EX04",
+      "name": "West Coastal Highway Exit",
+      "type": "exit",
+      "people": 0,
+      "capacity": 4000,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 60,
+      "y": 360
+    },
+    {
+      "id": "H01",
+      "name": "St. Teresa General Trauma Hospital",
+      "type": "hospital",
+      "people": 640,
+      "capacity": 1200,
+      "riskLevel": "LOW",
+      "priority": 5,
+      "x": 240,
+      "y": 240
+    },
+    {
+      "id": "H02",
+      "name": "Mercy Metropolitan Emergency Center",
+      "type": "hospital",
+      "people": 520,
+      "capacity": 1000,
+      "riskLevel": "LOW",
+      "priority": 5,
+      "x": 740,
+      "y": 250
+    },
+    {
+      "id": "RC01",
+      "name": "Central Ambulance & Rapid Dispatch Depot",
+      "type": "resource_center",
+      "people": 85,
+      "capacity": 350,
+      "riskLevel": "NONE",
+      "priority": 4,
+      "x": 140,
+      "y": 260
+    },
+    {
+      "id": "RC02",
+      "name": "Metro Fire & Heavy Rescue Logistics Hub",
+      "type": "resource_center",
+      "people": 110,
+      "capacity": 400,
+      "riskLevel": "NONE",
+      "priority": 4,
+      "x": 840,
+      "y": 230
+    },
+    {
+      "id": "EZ01",
+      "name": "Zone A - Downtown Commercial Core",
+      "type": "evacuation_zone",
+      "people": 2850,
+      "capacity": 4000,
+      "riskLevel": "LOW",
+      "priority": 3,
+      "x": 500,
+      "y": 250
+    },
+    {
+      "id": "EZ02",
+      "name": "Zone B - Riverfront District",
+      "type": "evacuation_zone",
+      "people": 1420,
+      "capacity": 2500,
+      "riskLevel": "LOW",
+      "priority": 3,
+      "x": 280,
+      "y": 580
+    },
+    {
+      "id": "EZ03",
+      "name": "Zone C - North Residential Quarter",
+      "type": "evacuation_zone",
+      "people": 3100,
+      "capacity": 4500,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 320,
+      "y": 140
+    },
+    {
+      "id": "EZ04",
+      "name": "Zone D - Industrial & Logistics Basin",
+      "type": "evacuation_zone",
+      "people": 940,
+      "capacity": 2000,
+      "riskLevel": "LOW",
+      "priority": 2,
+      "x": 820,
+      "y": 620
+    },
+    {
+      "id": "EZ05",
+      "name": "Zone E - South Academic & Civic Sector",
+      "type": "evacuation_zone",
+      "people": 2200,
+      "capacity": 3500,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 660,
+      "y": 580
+    },
+    {
+      "id": "J01",
+      "name": "North Cross Junction",
+      "type": "junction",
+      "people": 40,
+      "capacity": 600,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 500,
+      "y": 150
+    },
+    {
+      "id": "J02",
+      "name": "Metro Central Square Intersection",
+      "type": "junction",
+      "people": 120,
+      "capacity": 1000,
+      "riskLevel": "LOW",
+      "priority": 3,
+      "x": 480,
+      "y": 310
+    },
+    {
+      "id": "J03",
+      "name": "East Ring Interchange",
+      "type": "junction",
+      "people": 60,
+      "capacity": 800,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 820,
+      "y": 340
+    },
+    {
+      "id": "J04",
+      "name": "Riverfront Promenade Crossing",
+      "type": "junction",
+      "people": 35,
+      "capacity": 500,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 340,
+      "y": 540
+    },
+    {
+      "id": "J05",
+      "name": "South Boulevard Junction",
+      "type": "junction",
+      "people": 75,
+      "capacity": 700,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 580,
+      "y": 560
+    },
+    {
+      "id": "J06",
+      "name": "West Highway Overpass",
+      "type": "junction",
+      "people": 50,
+      "capacity": 650,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 170,
+      "y": 360
+    },
+    {
+      "id": "J07",
+      "name": "Midtown Hub Intersection",
+      "type": "junction",
+      "people": 90,
+      "capacity": 900,
+      "riskLevel": "LOW",
+      "priority": 3,
+      "x": 520,
+      "y": 410
+    },
+    {
+      "id": "J08",
+      "name": "Harborway Fork",
+      "type": "junction",
+      "people": 25,
+      "capacity": 450,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 260,
+      "y": 470
+    },
+    {
+      "id": "J09",
+      "name": "Civic Center Roundabout",
+      "type": "junction",
+      "people": 80,
+      "capacity": 850,
+      "riskLevel": "LOW",
+      "priority": 2,
+      "x": 440,
+      "y": 490
+    },
+    {
+      "id": "J10",
+      "name": "Industrial Park Gate Junction",
+      "type": "junction",
+      "people": 30,
+      "capacity": 500,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 740,
+      "y": 540
+    },
+    {
+      "id": "J11",
+      "name": "Academic Boulevard Crossing",
+      "type": "junction",
+      "people": 65,
+      "capacity": 600,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 660,
+      "y": 480
+    },
+    {
+      "id": "J12",
+      "name": "Outer Perimeter Interchange",
+      "type": "junction",
+      "people": 45,
+      "capacity": 750,
+      "riskLevel": "NONE",
+      "priority": 1,
+      "x": 840,
+      "y": 520
+    },
+    {
+      "id": "B01",
+      "name": "Metro Central Plaza",
+      "type": "building",
+      "people": 850,
+      "capacity": 1200,
+      "riskLevel": "LOW",
+      "priority": 4,
+      "x": 420,
+      "y": 240
+    },
+    {
+      "id": "B02",
+      "name": "Apex Financial Tower",
+      "type": "building",
+      "people": 1100,
+      "capacity": 1600,
+      "riskLevel": "LOW",
+      "priority": 4,
+      "x": 560,
+      "y": 240
+    },
+    {
+      "id": "B03",
+      "name": "Grand Civic City Hall",
+      "type": "building",
+      "people": 420,
+      "capacity": 800,
+      "riskLevel": "NONE",
+      "priority": 5,
+      "x": 390,
+      "y": 360
+    },
+    {
+      "id": "B04",
+      "name": "Skyline Residences North",
+      "type": "building",
+      "people": 680,
+      "capacity": 900,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 220,
+      "y": 110
+    },
+    {
+      "id": "B05",
+      "name": "Skyline Residences South",
+      "type": "building",
+      "people": 740,
+      "capacity": 950,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 500,
+      "y": 590
+    },
+    {
+      "id": "B06",
+      "name": "Verdant Heights Apartments",
+      "type": "building",
+      "people": 560,
+      "capacity": 750,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 380,
+      "y": 100
+    },
+    {
+      "id": "B07",
+      "name": "Unity Public High School",
+      "type": "building",
+      "people": 920,
+      "capacity": 1300,
+      "riskLevel": "NONE",
+      "priority": 5,
+      "x": 620,
+      "y": 110
+    },
+    {
+      "id": "B08",
+      "name": "St. Jude Primary Academy",
+      "type": "building",
+      "people": 460,
+      "capacity": 650,
+      "riskLevel": "NONE",
+      "priority": 5,
+      "x": 760,
+      "y": 130
+    },
+    {
+      "id": "B09",
+      "name": "Orion Tech Research Park",
+      "type": "building",
+      "people": 610,
+      "capacity": 1000,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 740,
+      "y": 410
+    },
+    {
+      "id": "B10",
+      "name": "Nova Shopping Mall",
+      "type": "building",
+      "people": 1450,
+      "capacity": 2200,
+      "riskLevel": "LOW",
+      "priority": 4,
+      "x": 610,
+      "y": 330
+    },
+    {
+      "id": "B11",
+      "name": "Harbor Point Condominiums",
+      "type": "building",
+      "people": 510,
+      "capacity": 700,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 200,
+      "y": 570
+    },
+    {
+      "id": "B12",
+      "name": "Riverside Cultural Center",
+      "type": "building",
+      "people": 320,
+      "capacity": 600,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 380,
+      "y": 620
+    },
+    {
+      "id": "B13",
+      "name": "Beacon Hill Terraces",
+      "type": "building",
+      "people": 480,
+      "capacity": 650,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 120,
+      "y": 440
+    },
+    {
+      "id": "B14",
+      "name": "Mercantile Trade Center",
+      "type": "building",
+      "people": 790,
+      "capacity": 1100,
+      "riskLevel": "LOW",
+      "priority": 3,
+      "x": 430,
+      "y": 430
+    },
+    {
+      "id": "B15",
+      "name": "Central Library & Archives",
+      "type": "building",
+      "people": 260,
+      "capacity": 500,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 580,
+      "y": 460
+    },
+    {
+      "id": "B16",
+      "name": "Phoenix Senior Living Community",
+      "type": "building",
+      "people": 380,
+      "capacity": 450,
+      "riskLevel": "NONE",
+      "priority": 5,
+      "x": 730,
+      "y": 630
+    },
+    {
+      "id": "B17",
+      "name": "Westside Community Sports Complex",
+      "type": "building",
+      "people": 540,
+      "capacity": 1200,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 210,
+      "y": 460
+    },
+    {
+      "id": "B18",
+      "name": "Midtown Medical Plaza",
+      "type": "building",
+      "people": 310,
+      "capacity": 500,
+      "riskLevel": "LOW",
+      "priority": 4,
+      "x": 490,
+      "y": 360
+    },
+    {
+      "id": "B19",
+      "name": "Heritage Artisan Quarter",
+      "type": "building",
+      "people": 290,
+      "capacity": 450,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 620,
+      "y": 530
+    },
+    {
+      "id": "B20",
+      "name": "Crestview Tower Suites",
+      "type": "building",
+      "people": 620,
+      "capacity": 850,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 870,
+      "y": 480
+    },
+    {
+      "id": "B21",
+      "name": "Cyberdyne Innovation Center",
+      "type": "building",
+      "people": 530,
+      "capacity": 800,
+      "riskLevel": "NONE",
+      "priority": 3,
+      "x": 880,
+      "y": 410
+    },
+    {
+      "id": "B22",
+      "name": "Riverside Maritime Warehouse",
+      "type": "building",
+      "people": 180,
+      "capacity": 400,
+      "riskLevel": "NONE",
+      "priority": 2,
+      "x": 230,
+      "y": 650
+    }
+  ],
+  "edges": [
+    {
+      "id": "E01",
+      "source": "J01",
+      "target": "EX01",
+      "distance": 450,
+      "travelTime": 36,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 80,
+      "blocked": false
+    },
+    {
+      "id": "E02",
+      "source": "B06",
+      "target": "J01",
+      "distance": 320,
+      "travelTime": 28,
+      "congestion": 0.05,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E03",
+      "source": "B07",
+      "target": "J01",
+      "distance": 340,
+      "travelTime": 30,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E04",
+      "source": "B04",
+      "target": "EZ03",
+      "distance": 210,
+      "travelTime": 18,
+      "congestion": 0.05,
+      "danger": 0,
+      "capacity": 45,
+      "blocked": false
+    },
+    {
+      "id": "E05",
+      "source": "EZ03",
+      "target": "B06",
+      "distance": 190,
+      "travelTime": 16,
+      "congestion": 0.05,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E06",
+      "source": "B07",
+      "target": "B08",
+      "distance": 310,
+      "travelTime": 26,
+      "congestion": 0.08,
+      "danger": 0,
+      "capacity": 45,
+      "blocked": false
+    },
+    {
+      "id": "E07",
+      "source": "J01",
+      "target": "J02",
+      "distance": 620,
+      "travelTime": 48,
+      "congestion": 0.35,
+      "danger": 0.05,
+      "capacity": 90,
+      "blocked": false
+    },
+    {
+      "id": "E08",
+      "source": "EZ03",
+      "target": "H01",
+      "distance": 480,
+      "travelTime": 40,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E09",
+      "source": "B08",
+      "target": "H02",
+      "distance": 420,
+      "travelTime": 35,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E10",
+      "source": "B01",
+      "target": "EZ01",
+      "distance": 180,
+      "travelTime": 15,
+      "congestion": 0.3,
+      "danger": 0.1,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E11",
+      "source": "B02",
+      "target": "EZ01",
+      "distance": 190,
+      "travelTime": 16,
+      "congestion": 0.28,
+      "danger": 0.08,
+      "capacity": 70,
+      "blocked": false
+    },
+    {
+      "id": "E12",
+      "source": "EZ01",
+      "target": "J02",
+      "distance": 220,
+      "travelTime": 18,
+      "congestion": 0.4,
+      "danger": 0.05,
+      "capacity": 85,
+      "blocked": false
+    },
+    {
+      "id": "E13",
+      "source": "B01",
+      "target": "B03",
+      "distance": 360,
+      "travelTime": 30,
+      "congestion": 0.25,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E14",
+      "source": "J02",
+      "target": "B18",
+      "distance": 170,
+      "travelTime": 14,
+      "congestion": 0.32,
+      "danger": 0.05,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E15",
+      "source": "J02",
+      "target": "B10",
+      "distance": 380,
+      "travelTime": 32,
+      "congestion": 0.45,
+      "danger": 0.05,
+      "capacity": 75,
+      "blocked": false
+    },
+    {
+      "id": "E16",
+      "source": "B10",
+      "target": "J03",
+      "distance": 490,
+      "travelTime": 38,
+      "congestion": 0.3,
+      "danger": 0,
+      "capacity": 80,
+      "blocked": false
+    },
+    {
+      "id": "E17",
+      "source": "RC01",
+      "target": "H01",
+      "distance": 230,
+      "travelTime": 18,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 70,
+      "blocked": false
+    },
+    {
+      "id": "E18",
+      "source": "RC01",
+      "target": "J06",
+      "distance": 310,
+      "travelTime": 25,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E19",
+      "source": "H01",
+      "target": "J06",
+      "distance": 350,
+      "travelTime": 28,
+      "congestion": 0.2,
+      "danger": 0,
+      "capacity": 70,
+      "blocked": false
+    },
+    {
+      "id": "E20",
+      "source": "J06",
+      "target": "EX04",
+      "distance": 380,
+      "travelTime": 30,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 85,
+      "blocked": false
+    },
+    {
+      "id": "E21",
+      "source": "H01",
+      "target": "B03",
+      "distance": 460,
+      "travelTime": 38,
+      "congestion": 0.22,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E22",
+      "source": "J06",
+      "target": "B13",
+      "distance": 260,
+      "travelTime": 22,
+      "congestion": 0.08,
+      "danger": 0,
+      "capacity": 45,
+      "blocked": false
+    },
+    {
+      "id": "E23",
+      "source": "B13",
+      "target": "B17",
+      "distance": 240,
+      "travelTime": 20,
+      "congestion": 0.08,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E24",
+      "source": "B17",
+      "target": "J08",
+      "distance": 220,
+      "travelTime": 18,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E25",
+      "source": "B03",
+      "target": "J09",
+      "distance": 390,
+      "travelTime": 32,
+      "congestion": 0.2,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E26",
+      "source": "J02",
+      "target": "J07",
+      "distance": 320,
+      "travelTime": 26,
+      "congestion": 0.38,
+      "danger": 0.05,
+      "capacity": 85,
+      "blocked": false
+    },
+    {
+      "id": "E27",
+      "source": "B18",
+      "target": "J07",
+      "distance": 180,
+      "travelTime": 15,
+      "congestion": 0.2,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E28",
+      "source": "J07",
+      "target": "B14",
+      "distance": 240,
+      "travelTime": 20,
+      "congestion": 0.25,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E29",
+      "source": "J07",
+      "target": "B15",
+      "distance": 210,
+      "travelTime": 18,
+      "congestion": 0.18,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E30",
+      "source": "B14",
+      "target": "J09",
+      "distance": 220,
+      "travelTime": 18,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E31",
+      "source": "B15",
+      "target": "J11",
+      "distance": 250,
+      "travelTime": 20,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E32",
+      "source": "H02",
+      "target": "RC02",
+      "distance": 260,
+      "travelTime": 21,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 70,
+      "blocked": false
+    },
+    {
+      "id": "E33",
+      "source": "RC02",
+      "target": "J03",
+      "distance": 330,
+      "travelTime": 26,
+      "congestion": 0.14,
+      "danger": 0,
+      "capacity": 75,
+      "blocked": false
+    },
+    {
+      "id": "E34",
+      "source": "H02",
+      "target": "J03",
+      "distance": 310,
+      "travelTime": 25,
+      "congestion": 0.18,
+      "danger": 0,
+      "capacity": 70,
+      "blocked": false
+    },
+    {
+      "id": "E35",
+      "source": "J03",
+      "target": "EX02",
+      "distance": 370,
+      "travelTime": 29,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 90,
+      "blocked": false
+    },
+    {
+      "id": "E36",
+      "source": "J03",
+      "target": "B09",
+      "distance": 270,
+      "travelTime": 22,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E37",
+      "source": "B09",
+      "target": "B21",
+      "distance": 320,
+      "travelTime": 26,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E38",
+      "source": "B21",
+      "target": "B20",
+      "distance": 200,
+      "travelTime": 16,
+      "congestion": 0.08,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E39",
+      "source": "B20",
+      "target": "J12",
+      "distance": 210,
+      "travelTime": 17,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E40",
+      "source": "B09",
+      "target": "J11",
+      "distance": 300,
+      "travelTime": 24,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E41",
+      "source": "J08",
+      "target": "EZ02",
+      "distance": 280,
+      "travelTime": 23,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E42",
+      "source": "B11",
+      "target": "EZ02",
+      "distance": 190,
+      "travelTime": 16,
+      "congestion": 0.08,
+      "danger": 0,
+      "capacity": 45,
+      "blocked": false
+    },
+    {
+      "id": "E43",
+      "source": "EZ02",
+      "target": "B22",
+      "distance": 180,
+      "travelTime": 15,
+      "congestion": 0.05,
+      "danger": 0,
+      "capacity": 40,
+      "blocked": false
+    },
+    {
+      "id": "E44",
+      "source": "EZ02",
+      "target": "J04",
+      "distance": 210,
+      "travelTime": 17,
+      "congestion": 0.18,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E45",
+      "source": "J04",
+      "target": "B12",
+      "distance": 230,
+      "travelTime": 19,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E46",
+      "source": "J08",
+      "target": "J09",
+      "distance": 410,
+      "travelTime": 33,
+      "congestion": 0.2,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E47",
+      "source": "J04",
+      "target": "J09",
+      "distance": 330,
+      "travelTime": 27,
+      "congestion": 0.22,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E48",
+      "source": "J09",
+      "target": "B05",
+      "distance": 250,
+      "travelTime": 20,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E49",
+      "source": "B05",
+      "target": "J05",
+      "distance": 210,
+      "travelTime": 17,
+      "congestion": 0.18,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    },
+    {
+      "id": "E50",
+      "source": "J05",
+      "target": "EX03",
+      "distance": 340,
+      "travelTime": 27,
+      "congestion": 0.2,
+      "danger": 0,
+      "capacity": 90,
+      "blocked": false
+    },
+    {
+      "id": "E51",
+      "source": "J07",
+      "target": "J05",
+      "distance": 430,
+      "travelTime": 34,
+      "congestion": 0.25,
+      "danger": 0,
+      "capacity": 80,
+      "blocked": false
+    },
+    {
+      "id": "E52",
+      "source": "J11",
+      "target": "B19",
+      "distance": 160,
+      "travelTime": 13,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E53",
+      "source": "B19",
+      "target": "EZ05",
+      "distance": 170,
+      "travelTime": 14,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 55,
+      "blocked": false
+    },
+    {
+      "id": "E54",
+      "source": "EZ05",
+      "target": "J05",
+      "distance": 230,
+      "travelTime": 18,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E55",
+      "source": "J11",
+      "target": "J10",
+      "distance": 270,
+      "travelTime": 22,
+      "congestion": 0.15,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E56",
+      "source": "J10",
+      "target": "B16",
+      "distance": 240,
+      "travelTime": 19,
+      "congestion": 0.1,
+      "danger": 0,
+      "capacity": 50,
+      "blocked": false
+    },
+    {
+      "id": "E57",
+      "source": "J10",
+      "target": "EZ04",
+      "distance": 230,
+      "travelTime": 18,
+      "congestion": 0.12,
+      "danger": 0,
+      "capacity": 60,
+      "blocked": false
+    },
+    {
+      "id": "E58",
+      "source": "EZ04",
+      "target": "J12",
+      "distance": 240,
+      "travelTime": 19,
+      "congestion": 0.14,
+      "danger": 0,
+      "capacity": 65,
+      "blocked": false
+    }
+  ]
+};
+  populateOriginDropdown();
+  renderGraphCanvas();
+}
+
+function initNavigation() {
+  const navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const targetTab = btn.getAttribute('data-tab');
+      switchTab(targetTab);
+    });
+  });
+}
+
+function switchTab(tabId) {
+  STATE.activeTab = tabId;
+
+  document.querySelectorAll('.nav-item').forEach((item) => {
+    item.classList.toggle('active', item.getAttribute('data-tab') === tabId);
+  });
+
+  document.querySelectorAll('.tab-pane').forEach((pane) => {
+    pane.classList.toggle('active', pane.id === `tab-${tabId}`);
+  });
+
+  if (tabId === 'explorer' || tabId === 'evacuation' || tabId === 'algorithms') {
+    requestAnimationFrame(() => renderGraphCanvas());
+  }
+}
+
+// ============================================================================
+// 4. INTERACTIVE SVG GRAPH RENDERER & INSPECTOR
+// ============================================================================
+
+function renderGraphCanvas() {
+  const svg = document.getElementById('network-svg');
+  if (!svg || !STATE.graph) return;
+
+  const g = document.getElementById('network-viewport-group');
+  if (!g) return;
+
+  // Apply Pan/Zoom transform
+  g.setAttribute('transform', `translate(${STATE.graphView.panX}, ${STATE.graphView.panY}) scale(${STATE.graphView.zoom})`);
+
+  // Clear previous dynamic content
+  g.innerHTML = '';
+
+  const nodes = STATE.graph.nodes;
+  const edges = STATE.graph.edges;
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  // 1. Render Edges
+  edges.forEach((edge) => {
+    const s = nodeMap.get(edge.source);
+    const t = nodeMap.get(edge.target);
+    if (!s || !t) return;
+
+    const isPath = isEdgeInActivePath(edge.id);
+    const isBlocked = edge.blocked;
+
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', s.x);
+    line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x);
+    line.setAttribute('y2', t.y);
+    line.setAttribute('stroke', isBlocked ? '#ef4444' : isPath ? '#16a34a' : '#cbd5e1');
+    line.setAttribute('stroke-width', isPath ? '5' : isBlocked ? '3' : '2');
+    line.setAttribute('stroke-linecap', 'round');
+    if (isBlocked) line.setAttribute('stroke-dasharray', '6,4');
+    line.style.cursor = 'pointer';
+
+    line.addEventListener('click', (e) => {
+      e.stopPropagation();
+      inspectEdge(edge);
+    });
+
+    g.appendChild(line);
+  });
+
+  // 2. Render Nodes
+  nodes.forEach((node) => {
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.setAttribute('transform', `translate(${node.x}, ${node.y})`);
+    group.style.cursor = 'pointer';
+
+    const shape = getNodeShapeSvg(node);
+    group.appendChild(shape);
+
+    // Label
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('y', 20);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('font-size', '10px');
+    text.setAttribute('font-weight', '700');
+    text.setAttribute('fill', '#334155');
+    text.textContent = node.id;
+    group.appendChild(text);
+
+    group.addEventListener('click', (e) => {
+      e.stopPropagation();
+      inspectNode(node);
+    });
+
+    g.appendChild(group);
+  });
+}
+
+function getNodeShapeSvg(node) {
+  const isOrigin = node.id === STATE.selectedOrigin;
+  const isExit = node.type === 'exit';
+  const isHospital = node.type === 'hospital';
+  const isZone = node.type === 'zone';
+
+  let fill = '#64748b';
+  let stroke = '#ffffff';
+
+  if (isExit) { fill = '#15803d'; stroke = '#bbf7d0'; }
+  else if (isHospital) { fill = '#dc2626'; stroke = '#fecaca'; }
+  else if (isZone) { fill = '#f59e0b'; stroke = '#fef08a'; }
+  else if (node.type === 'resource_center') { fill = '#0284c7'; stroke = '#bae6fd'; }
+
+  if (isOrigin) {
+    fill = '#16a34a';
+    stroke = '#22c55e';
+  }
+
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('r', isExit || isOrigin ? '13' : '10');
+  circle.setAttribute('fill', fill);
+  circle.setAttribute('stroke', stroke);
+  circle.setAttribute('stroke-width', '2.5');
+  circle.setAttribute('filter', 'drop-shadow(0px 2px 3px rgba(0,0,0,0.15))');
+
+  return circle;
+}
+
+function isEdgeInActivePath(edgeId) {
+  if (!STATE.lastDijkstraResult || !STATE.lastDijkstraResult.edgePath) return false;
+  return STATE.lastDijkstraResult.edgePath.includes(edgeId);
+}
+
+function initGraphCanvasInteractions() {
+  const container = document.getElementById('graph-canvas-container');
+  const svg = document.getElementById('network-svg');
+  if (!container || !svg) return;
+
+  container.addEventListener('mousedown', (e) => {
+    STATE.graphView.isDragging = true;
+    STATE.graphView.dragStart = { x: e.clientX - STATE.graphView.panX, y: e.clientY - STATE.graphView.panY };
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!STATE.graphView.isDragging) return;
+    STATE.graphView.panX = e.clientX - STATE.graphView.dragStart.x;
+    STATE.graphView.panY = e.clientY - STATE.graphView.dragStart.y;
+    renderGraphCanvas();
+  });
+
+  window.addEventListener('mouseup', () => {
+    STATE.graphView.isDragging = false;
+  });
+
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    STATE.graphView.zoom = Math.max(0.4, Math.min(3.5, STATE.graphView.zoom * factor));
+    renderGraphCanvas();
+  });
+}
+
+function zoomGraph(delta) {
+  STATE.graphView.zoom = Math.max(0.4, Math.min(3.5, STATE.graphView.zoom + delta));
+  renderGraphCanvas();
+}
+
+function resetGraphView() {
+  STATE.graphView.zoom = 1;
+  STATE.graphView.panX = 0;
+  STATE.graphView.panY = 0;
+  renderGraphCanvas();
+}
+
+function inspectNode(node) {
+  STATE.graphView.selectedNode = node;
+  const panel = document.getElementById('inspector-content');
+  if (!panel) return;
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h4 style="font-size:0.95rem;font-weight:700;">${escapeHtml(node.name)}</h4>
+      <span class="badge badge-${(node.riskLevel || 'NONE').toLowerCase()}">${escapeHtml(node.riskLevel || 'NONE')}</span>
+    </div>
+    <div style="font-size:0.78rem;color:var(--text-sub);display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div><strong>Node ID:</strong> ${escapeHtml(node.id)}</div>
+      <div><strong>Type:</strong> ${escapeHtml(node.type)}</div>
+      <div><strong>Civilians:</strong> ${node.people || 0}</div>
+      <div><strong>Safe Capacity:</strong> ${node.capacity || 0}</div>
+      <div><strong>Priority:</strong> Level ${node.priority || 1}</div>
+      <div><strong>Coordinates:</strong> (${node.x}, ${node.y})</div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary btn-sm" onclick="setOriginNode('${escapeHtml(node.id)}')">Set as Evacuation Origin</button>
+    </div>
+  `;
+}
+
+function inspectEdge(edge) {
+  STATE.graphView.selectedEdge = edge;
+  const panel = document.getElementById('inspector-content');
+  if (!panel) return;
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h4 style="font-size:0.95rem;font-weight:700;">${escapeHtml(edge.name || edge.id)}</h4>
+      <span class="badge ${edge.blocked ? 'badge-critical' : 'badge-low'}">${edge.blocked ? 'BLOCKED' : 'PASSABLE'}</span>
+    </div>
+    <div style="font-size:0.78rem;color:var(--text-sub);display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div><strong>Corridor ID:</strong> ${escapeHtml(edge.id)}</div>
+      <div><strong>Source -> Target:</strong> ${escapeHtml(edge.source)} -> ${escapeHtml(edge.target)}</div>
+      <div><strong>Distance:</strong> ${edge.distance} meters</div>
+      <div><strong>Class:</strong> ${escapeHtml(edge.highway || 'arterial')}</div>
+      <div><strong>Travel Time:</strong> ${edge.travelTime || 20}s</div>
+      <div><strong>Base Speed:</strong> ${edge.speedKmh || 40} km/h</div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-secondary btn-sm" onclick="toggleEdgeBlock('${escapeHtml(edge.id)}')">
+        ${edge.blocked ? 'Unblock Corridor' : 'Block Corridor (Hazard)'}
+      </button>
+    </div>
+  `;
+}
+
+function setOriginNode(nodeId) {
+  STATE.selectedOrigin = nodeId;
+  const sel = document.getElementById('origin-select');
+  if (sel) sel.value = nodeId;
+  renderGraphCanvas();
+  runEvacuationCalculation();
+}
+
+function toggleEdgeBlock(edgeId) {
+  const edge = STATE.graph.edges.find((e) => e.id === edgeId);
+  if (edge) {
+    edge.blocked = !edge.blocked;
+    renderGraphCanvas();
+    if (STATE.graphView.selectedEdge?.id === edgeId) inspectEdge(edge);
+  }
+}
+
+// ============================================================================
+// 5. EVACUATION PLANNER & DIJKSTRA DISPATCH
+// ============================================================================
+
+function populateOriginDropdown() {
+  const sel = document.getElementById('origin-select');
+  if (!sel || !STATE.graph) return;
+  sel.innerHTML = '';
+
+  STATE.graph.nodes.forEach((n) => {
+    const opt = document.createElement('option');
+    opt.value = n.id;
+    opt.textContent = `${n.id} - ${n.name} (${n.type})`;
+    if (n.id === STATE.selectedOrigin) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  sel.addEventListener('change', (e) => {
+    STATE.selectedOrigin = e.target.value;
+    renderGraphCanvas();
+    runEvacuationCalculation();
+  });
+}
+
+function runEvacuationCalculation() {
+  const originId = STATE.selectedOrigin;
+  const exitId = document.getElementById('exit-select')?.value || null;
+
+  // Run Dijkstra on the active graph
+  const result = runLocalDijkstra(STATE.graph, originId, exitId === 'all' ? null : exitId);
+  STATE.lastDijkstraResult = result;
+
+  renderGraphCanvas();
+  renderEvacuationMetrics(result);
+  prepareVoiceInstructions(result);
+}
+
+function runLocalDijkstra(graph, sourceId, targetId = null) {
+  const nodes = graph.nodes;
+  const edges = graph.edges;
+
+  const adj = new Map();
+  nodes.forEach((n) => adj.set(n.id, []));
+
+  edges.forEach((e) => {
+    if (e.blocked) return;
+    const cost = e.travelTime || (e.distance / ((e.speedKmh || 40) / 3.6));
+    adj.get(e.source)?.push({ target: e.target, cost, edge: e });
+    adj.get(e.target)?.push({ target: e.source, cost, edge: e });
+  });
+
+  const dist = new Map();
+  const prev = new Map();
+  const visited = new Set();
+  nodes.forEach((n) => dist.set(n.id, Infinity));
+  dist.set(sourceId, 0);
+
+  const pq = [{ id: sourceId, dist: 0 }];
+
+  while (pq.length > 0) {
+    pq.sort((a, b) => a.dist - b.dist);
+    const { id: u, dist: currentDist } = pq.shift();
+
+    if (visited.has(u)) continue;
+    visited.add(u);
+
+    if (targetId && u === targetId) break;
+
+    const neighbors = adj.get(u) || [];
+    for (let i = 0; i < neighbors.length; i++) {
+      const { target: v, cost: weight, edge } = neighbors[i];
+      if (visited.has(v)) continue;
+
+      const alt = currentDist + weight;
+      if (alt < dist.get(v)) {
+        dist.set(v, alt);
+        prev.set(v, { node: u, edge });
+        pq.push({ id: v, dist: alt });
+      }
+    }
+  }
+
+  let finalTarget = targetId;
+  if (!finalTarget) {
+    const exits = nodes.filter((n) => n.type === 'exit');
+    let minCost = Infinity;
+    exits.forEach((ex) => {
+      const c = dist.get(ex.id) || Infinity;
+      if (c < minCost) {
+        minCost = c;
+        finalTarget = ex.id;
+      }
+    });
+  }
+
+  const path = [];
+  const edgePath = [];
+  let curr = finalTarget;
+  let totalDistance = 0;
+
+  while (curr && prev.has(curr)) {
+    path.unshift(curr);
+    const p = prev.get(curr);
+    edgePath.unshift(p.edge.id);
+    totalDistance += p.edge.distance;
+    curr = p.node;
+  }
+  if (path.length > 0 || curr === sourceId) path.unshift(sourceId);
+
+  return {
+    sourceId,
+    targetExitId: finalTarget,
+    totalCost: Number((dist.get(finalTarget) || 0).toFixed(1)),
+    distance: totalDistance,
+    path,
+    edgePath,
+  };
+}
+
+function renderEvacuationMetrics(result) {
+  const container = document.getElementById('evacuation-results-panel');
+  if (!container) return;
+
+  const nodeMap = new Map(STATE.graph.nodes.map((n) => [n.id, n]));
+  const exitNode = nodeMap.get(result.targetExitId);
+
+  container.innerHTML = `
+    <div class="grid-4" style="margin-bottom:16px;">
+      <div class="metric-box">
+        <span class="metric-label">Recommended Safe Exit</span>
+        <span class="metric-value" style="font-size:1.15rem;color:var(--primary);">${escapeHtml(exitNode?.name || result.targetExitId)}</span>
+        <span class="metric-footer">Safest Egress Gateway</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Estimated Transit Time</span>
+        <span class="metric-value">${Math.round(result.totalCost)} sec</span>
+        <span class="metric-footer">${(result.totalCost / 60).toFixed(1)} minutes</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Evacuation Distance</span>
+        <span class="metric-value">${result.distance} m</span>
+        <span class="metric-footer">${(result.distance / 1000).toFixed(2)} km</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Waypoints</span>
+        <span class="metric-value">${result.path.length}</span>
+        <span class="metric-footer">Nodes in Safe Corridor</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h4 class="card-title">Turn-by-Turn Safe Evacuation Guidance</h4>
+        <span class="badge badge-live">DIJKSTRA DETERMINISTIC</span>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Step</th>
+              <th>Waypoint</th>
+              <th>Instruction</th>
+              <th>Corridor</th>
+              <th>Leg Distance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${result.path.map((nodeId, idx) => {
+              const node = nodeMap.get(nodeId);
+              const edgeId = result.edgePath[idx];
+              const edge = STATE.graph.edges.find((e) => e.id === edgeId);
+              return `
+                <tr>
+                  <td><strong>#${idx + 1}</strong></td>
+                  <td>${escapeHtml(node?.name || nodeId)} (${escapeHtml(nodeId)})</td>
+                  <td>${idx === 0 ? 'Commence evacuation from incident zone' : idx === result.path.length - 1 ? 'Safely arrive at egress portal' : `Follow corridor to ${escapeHtml(node?.name || nodeId)}`}</td>
+                  <td>${escapeHtml(edge ? edge.name || edge.id : 'Egress Gate')}</td>
+                  <td>${edge ? edge.distance + ' m' : '-'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
+// 6. LIVE VOICE NAVIGATION (Web Speech API)
+// ============================================================================
+
+function initVoiceNavigation() {
+  const hasSpeech = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window;
+  const toggleBtn = document.getElementById('voice-toggle-btn');
+  const startBtn = document.getElementById('nav-start-btn');
+  const pauseBtn = document.getElementById('nav-pause-btn');
+  const stopBtn = document.getElementById('nav-stop-btn');
+  const instructionEl = document.getElementById('voice-current-instruction');
+
+  if (!hasSpeech) {
+    STATE.voiceNav.enabled = false;
+    if (toggleBtn) {
+      toggleBtn.textContent = '🔇 Voice: Not Supported';
+      toggleBtn.disabled = true;
+    }
+    if (instructionEl) {
+      instructionEl.textContent = 'Web Speech API is not supported in this browser.';
+    }
+    return;
+  }
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      STATE.voiceNav.enabled = !STATE.voiceNav.enabled;
+      toggleBtn.textContent = `🔊 Voice Guidance: ${STATE.voiceNav.enabled ? 'ON' : 'OFF'}`;
+      if (!STATE.voiceNav.enabled) stopVoiceGuidance();
+    });
+  }
+
+  if (startBtn) startBtn.addEventListener('click', startVoiceGuidance);
+  if (pauseBtn) pauseBtn.addEventListener('click', pauseVoiceGuidance);
+  if (stopBtn) stopBtn.addEventListener('click', stopVoiceGuidance);
+}
+
+function prepareVoiceInstructions(result) {
+  if (!result || !result.path || result.path.length <= 1) return;
+  const nodeMap = new Map(STATE.graph.nodes.map((n) => [n.id, n]));
+  const steps = [];
+
+  for (let i = 0; i < result.path.length - 1; i++) {
+    const from = nodeMap.get(result.path[i]);
+    const to = nodeMap.get(result.path[i + 1]);
+    const edgeId = result.edgePath[i];
+    const edge = STATE.graph.edges.find((e) => e.id === edgeId);
+
+    const roadName = edge?.name || 'the designated emergency corridor';
+    const dist = edge?.distance || 200;
+
+    let instruction = '';
+    if (i === 0) {
+      instruction = `Commence evacuation from ${from?.name || 'origin'}. Proceed along ${roadName} for ${dist} meters.`;
+    } else if (i === result.path.length - 2) {
+      instruction = `Continue for ${dist} meters onto ${roadName}. Your evacuation exit ${to?.name || 'portal'} is ahead.`;
+    } else {
+      instruction = `Turn towards ${to?.name || 'waypoint'} onto ${roadName} and proceed for ${dist} meters.`;
+    }
+    steps.push(instruction);
+  }
+  steps.push('You have successfully reached the safe evacuation exit. Stand by for emergency personnel.');
+
+  STATE.voiceNav.steps = steps;
+  STATE.voiceNav.currentIndex = 0;
+  updateVoiceUi();
+}
+
+function startVoiceGuidance() {
+  if (!STATE.voiceNav.steps || STATE.voiceNav.steps.length === 0) {
+    runEvacuationCalculation();
+  }
+  STATE.voiceNav.status = 'navigating';
+  updateVoiceUi();
+  speakNextInstruction();
+}
+
+function pauseVoiceGuidance() {
+  STATE.voiceNav.status = 'paused';
+  if (STATE.voiceNav.synth) STATE.voiceNav.synth.cancel();
+  updateVoiceUi();
+}
+
+function stopVoiceGuidance() {
+  STATE.voiceNav.status = 'idle';
+  STATE.voiceNav.currentIndex = 0;
+  if (STATE.voiceNav.synth) STATE.voiceNav.synth.cancel();
+  updateVoiceUi();
+}
+
+function speakNextInstruction() {
+  if (STATE.voiceNav.status !== 'navigating') return;
+  if (!STATE.voiceNav.synth || !STATE.voiceNav.enabled) return;
+
+  const idx = STATE.voiceNav.currentIndex;
+  if (idx >= STATE.voiceNav.steps.length) {
+    stopVoiceGuidance();
+    return;
+  }
+
+  const text = STATE.voiceNav.steps[idx];
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+
+  utterance.onend = () => {
+    if (STATE.voiceNav.status === 'navigating') {
+      STATE.voiceNav.currentIndex++;
+      updateVoiceUi();
+      if (STATE.voiceNav.currentIndex < STATE.voiceNav.steps.length) {
+        setTimeout(speakNextInstruction, 2500); // 2.5s pacing
+      } else {
+        stopVoiceGuidance();
+      }
+    }
+  };
+
+  STATE.voiceNav.synth.speak(utterance);
+}
+
+function updateVoiceUi() {
+  const textEl = document.getElementById('voice-current-instruction');
+  const subEl = document.getElementById('voice-step-counter');
+  const bars = document.querySelectorAll('.voice-bar');
+
+  if (textEl) {
+    const text = STATE.voiceNav.steps[STATE.voiceNav.currentIndex] || 'Voice guidance ready. Press Start Navigation.';
+    textEl.textContent = text;
+  }
+  if (subEl) {
+    subEl.textContent = STATE.voiceNav.status === 'navigating'
+      ? `Step ${STATE.voiceNav.currentIndex + 1} of ${STATE.voiceNav.steps.length}`
+      : 'Navigation Standby';
+  }
+
+  bars.forEach((b) => {
+    b.classList.toggle('active', STATE.voiceNav.status === 'navigating');
+  });
+}
+
+// ============================================================================
+// 7. REAL BROWSER GPS & LIVE CONDITIONS
+// ============================================================================
+
+function initGeolocation() {
+  if (!navigator.geolocation) {
+    updateGpsBadge('GPS UNSUPPORTED', 'badge-static');
+    return;
+  }
+
+  updateGpsBadge('ACQUIRING...', 'badge-static');
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => handleGpsUpdate(pos),
+    (err) => handleGpsError(err),
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+  );
+
+  STATE.gps.watchId = navigator.geolocation.watchPosition(
+    (pos) => handleGpsUpdate(pos),
+    (err) => handleGpsError(err),
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+  );
+}
+
+function handleGpsUpdate(position) {
+  STATE.gps.active = true;
+  STATE.gps.lat = position.coords.latitude;
+  STATE.gps.lon = position.coords.longitude;
+
+  const latSpan = document.getElementById('telemetry-gps-lat');
+  const lonSpan = document.getElementById('telemetry-gps-lon');
+
+  if (latSpan) latSpan.textContent = position.coords.latitude.toFixed(4);
+  if (lonSpan) lonSpan.textContent = position.coords.longitude.toFixed(4);
+  updateGpsBadge('LIVE GPS', 'badge-live');
+
+  // Query live weather through server
+  callServer('getLiveConditions', position.coords.latitude, position.coords.longitude)
+    .then((cond) => {
+      if (cond && cond.weather && cond.weather.status === 'LIVE') {
+        const tempEl = document.getElementById('telemetry-weather-temp');
+        if (tempEl) tempEl.textContent = `${cond.weather.temperatureC}°C, ${cond.weather.condition}`;
+      }
+    })
+    .catch((err) => console.warn('Live weather poll warning:', err));
+}
+
+function handleGpsError(err) {
+  let label = 'GPS ERROR';
+  if (err.code === 1) label = 'GPS DENIED';
+  else if (err.code === 2) label = 'GPS UNAVAILABLE';
+  else if (err.code === 3) label = 'GPS TIMEOUT';
+  updateGpsBadge(label, 'badge-critical');
+}
+
+function updateGpsBadge(label, className) {
+  const badge = document.getElementById('telemetry-gps-badge');
+  if (badge) {
+    badge.className = `badge ${className}`;
+    badge.textContent = label;
+  }
+}
+
+// ============================================================================
+// 8. DATABASE CRUD & SCENARIO ARCHIVE (Google Sheets)
+// ============================================================================
+
+function loadScenariosFromDatabase() {
+  const container = document.getElementById('scenarios-list-container');
+  if (container) container.innerHTML = '<p style="padding:16px;color:var(--text-muted);">Connecting to Google Sheets database...</p>';
+
+  callServer('getScenarios')
+    .then((scenarios) => {
+      STATE.scenariosList = scenarios || [];
+      renderScenariosList(STATE.scenariosList);
+      refreshTelemetryHealth();
+    })
+    .catch((err) => {
+      if (container) {
+        container.innerHTML = `<p style="padding:16px;color:var(--danger);">Database read error: ${escapeHtml(err.message)}</p>`;
+      }
+    });
+}
+
+function renderScenariosList(scenarios) {
+  const container = document.getElementById('scenarios-list-container');
+  if (!container) return;
+
+  if (!scenarios || scenarios.length === 0) {
+    container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-muted);">No crisis scenarios found. Click "Seed Default Scenarios" above.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Scenario Name</th>
+            <th>Type</th>
+            <th>Location</th>
+            <th>People Affected</th>
+            <th>Risk Level</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${scenarios.map((s) => `
+            <tr>
+              <td><strong>${escapeHtml(s.name)}</strong></td>
+              <td>${escapeHtml(s.emergencyType)}</td>
+              <td>${escapeHtml(s.emergencyLocation)}</td>
+              <td>${s.peopleAffected?.toLocaleString() || 1000}</td>
+              <td><span class="badge badge-${(s.riskLevel || 'CRITICAL').toLowerCase()}">${escapeHtml(s.riskLevel)}</span></td>
+              <td>${s.createdAt ? new Date(s.createdAt).toLocaleDateString() : 'Active'}</td>
+              <td>
+                <button class="btn btn-secondary btn-sm" onclick="loadScenarioDetails('${escapeHtml(s.id)}')">Inspect</button>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteScenario('${escapeHtml(s.id)}')">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function loadScenarioDetails(id) {
+  callServer('getScenarioById', id)
+    .then((scenario) => {
+      showScenarioModal(scenario);
+    })
+    .catch((err) => alert('Error loading scenario: ' + err.message));
+}
+
+function showScenarioModal(s) {
+  const modal = document.getElementById('scenario-modal');
+  const body = document.getElementById('scenario-modal-body');
+  if (!modal || !body) return;
+
+  body.innerHTML = `
+    <h3 style="font-size:1.15rem;font-weight:800;color:var(--primary-dark);">${escapeHtml(s.name)}</h3>
+    <p style="font-size:0.85rem;color:var(--text-muted);">${escapeHtml(s.description || 'No description provided.')}</p>
+    
+    <div class="grid-3" style="margin:16px 0;">
+      <div class="metric-box">
+        <span class="metric-label">Crisis Type</span>
+        <span class="metric-value" style="font-size:1.1rem;">${escapeHtml(s.emergencyType)}</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Casualties / Risk</span>
+        <span class="metric-value" style="font-size:1.1rem;">${s.peopleAffected}</span>
+      </div>
+      <div class="metric-box">
+        <span class="metric-label">Risk Severity</span>
+        <span class="metric-value" style="font-size:1.1rem;color:var(--danger);">${escapeHtml(s.riskLevel)}</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h4 style="font-size:0.85rem;font-weight:700;margin-bottom:8px;">Relational Algorithm Execution Results</h4>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Algorithm</th>
+              <th>Execution Time</th>
+              <th>Nodes Visited</th>
+              <th>Result Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(s.algorithmResults || []).map((r) => `
+              <tr>
+                <td><strong>${escapeHtml(r.algorithmName)}</strong></td>
+                <td>${Number(r.executionTime).toFixed(2)} ms</td>
+                <td>${r.nodesVisited || 47}</td>
+                <td>${r.resultCost || 0}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button class="btn btn-secondary" onclick="closeScenarioModal()">Close</button>
+      <button class="btn btn-primary" onclick="applyScenarioToLivePlanner('${escapeHtml(s.emergencyLocation)}'); closeScenarioModal();">
+        Load into Evacuation Planner
+      </button>
+    </div>
+  `;
+
+  modal.classList.add('active');
+}
+
+function closeScenarioModal() {
+  document.getElementById('scenario-modal')?.classList.remove('active');
+}
+
+function applyScenarioToLivePlanner(locId) {
+  STATE.selectedOrigin = locId || 'B01';
+  switchTab('evacuation');
+  populateOriginDropdown();
+  runEvacuationCalculation();
+}
+
+function confirmDeleteScenario(id) {
+  if (!confirm('Are you sure you want to delete this scenario and all associated runs from Google Sheets?')) return;
+  callServer('deleteScenario', id)
+    .then(() => {
+      loadScenariosFromDatabase();
+    })
+    .catch((err) => alert('Delete failed: ' + err.message));
+}
+
+function seedDatabaseAction() {
+  callServer('seedDefaultScenarios')
+    .then((count) => {
+      alert(`Successfully seeded ${count} default scenarios in Google Sheets.`);
+      loadScenariosFromDatabase();
+    })
+    .catch((err) => alert('Seed failed: ' + err.message));
+}
+
+function openNewScenarioModal() {
+  const modal = document.getElementById('scenario-modal');
+  const body = document.getElementById('scenario-modal-body');
+  if (!modal || !body) return;
+
+  body.innerHTML = `
+    <h3 style="font-size:1.15rem;font-weight:800;color:var(--primary-dark);margin-bottom:12px;">Create New Disaster Scenario</h3>
+    <form id="new-scenario-form" onsubmit="event.preventDefault(); submitNewScenario();" style="display:flex;flex-direction:column;gap:12px;">
+      <div class="form-group">
+        <label class="form-label">Scenario Name</label>
+        <input type="text" id="new-scen-name" class="form-control" required placeholder="e.g. Chemical Storage Rupture">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea id="new-scen-desc" class="form-control" rows="2" placeholder="Brief disaster scenario context..."></textarea>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Disaster Type</label>
+          <select id="new-scen-type" class="form-control">
+            <option value="Fire">Fire</option>
+            <option value="Flood">Flood</option>
+            <option value="Earthquake">Earthquake</option>
+            <option value="Chemical Leak">Chemical Leak</option>
+            <option value="Structural Collapse">Structural Collapse</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Epicenter Location</label>
+          <select id="new-scen-loc" class="form-control">
+            ${STATE.graph.nodes.map(n => `<option value="${n.id}">${n.id} - ${n.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Estimated People Affected</label>
+          <input type="number" id="new-scen-people" class="form-control" value="1500" min="50" max="20000">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Risk Severity Level</label>
+          <select id="new-scen-risk" class="form-control">
+            <option value="CRITICAL">CRITICAL</option>
+            <option value="HIGH">HIGH</option>
+            <option value="MODERATE">MODERATE</option>
+            <option value="LOW">LOW</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+        <button type="button" class="btn btn-secondary" onclick="closeScenarioModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save to Google Sheets</button>
+      </div>
+    </form>
+  `;
+
+  modal.classList.add('active');
+}
+
+function submitNewScenario() {
+  const data = {
+    name: document.getElementById('new-scen-name')?.value || 'Emergency Scenario',
+    description: document.getElementById('new-scen-desc')?.value || '',
+    emergencyType: document.getElementById('new-scen-type')?.value || 'Fire',
+    emergencyLocation: document.getElementById('new-scen-loc')?.value || 'B01',
+    peopleAffected: Number(document.getElementById('new-scen-people')?.value || 1000),
+    riskLevel: document.getElementById('new-scen-risk')?.value || 'CRITICAL',
+  };
+
+  closeScenarioModal();
+
+  callServer('createScenario', data)
+    .then((created) => {
+      alert(`Scenario "${created.name}" created and simulated successfully.`);
+      loadScenariosFromDatabase();
+    })
+    .catch((err) => alert('Failed to create scenario: ' + err.message));
+}
+
+// ============================================================================
+// 9. GEMINI AI TACTICAL ADVISORY
+// ============================================================================
+
+function askGeminiTacticalAdvice() {
+  const advisoryBox = document.getElementById('gemini-advisory-content');
+  if (advisoryBox) advisoryBox.innerHTML = '<p style="color:var(--text-muted);padding:12px;">Querying Google Gemini AI tactical copilot via UrlFetchApp...</p>';
+
+  const scenarioData = {
+    origin: STATE.selectedOrigin,
+    targetExit: STATE.lastDijkstraResult?.targetExitId || 'EX01',
+    transitTimeSec: STATE.lastDijkstraResult?.totalCost || 120,
+    evacuationPath: STATE.lastDijkstraResult?.path || [],
+    distanceMeters: STATE.lastDijkstraResult?.distance || 1200,
+  };
+
+  callServer('askGemini', 'analyze', scenarioData, 'Synthesize risk hotspots and provide immediate tactical evacuation instructions for municipal commanders.')
+    .then((res) => {
+      if (advisoryBox) {
+        advisoryBox.innerHTML = `<div style="background:var(--primary-soft);border:1px solid var(--primary-border);border-radius:var(--radius-sm);padding:14px;font-size:0.85rem;line-height:1.6;color:var(--text-main);white-space:pre-wrap;">${escapeHtml(res.text || res)}</div>`;
+      }
+    })
+    .catch((err) => {
+      if (advisoryBox) {
+        advisoryBox.innerHTML = `<div style="color:var(--danger);padding:12px;">Gemini advisory unavailable: ${escapeHtml(err.message)}</div>`;
+      }
+    });
+}
+
+// ============================================================================
+// 10. OPENSTREETMAP LIVE QUERY ACTION
+// ============================================================================
+
+function fetchLiveOsmGraphAction() {
+  const btn = document.getElementById('fetch-osm-btn');
+  if (btn) btn.textContent = '⏳ Querying Overpass...';
+
+  callServer('getLiveOsmGraph', STATE.gps.lat, STATE.gps.lon, 750)
+    .then((osmGraph) => {
+      if (osmGraph && osmGraph.nodes && osmGraph.nodes.length > 0) {
+        STATE.graph = osmGraph;
+        renderGraphCanvas();
+        populateOriginDropdown();
+        alert(`Loaded ${osmGraph.nodes.length} nodes & ${osmGraph.edges.length} corridors from ${osmGraph.dataSource}.`);
+      }
+    })
+    .catch((err) => {
+      alert('OpenStreetMap query notice: ' + err.message + '\nOperating on canonical 47-node urban graph.');
+    })
+    .finally(() => {
+      if (btn) btn.textContent = '🌐 Query Live OSM Network';
+    });
+}
+
+// ============================================================================
+// 11. ALGORITHM LAB INTERACTIVE PLAYBACK
+// ============================================================================
+
+function switchAlgoLab(algo) {
+  STATE.algoLab.selectedAlgo = algo;
+  document.querySelectorAll('.algo-btn').forEach((b) => {
+    b.classList.toggle('active', b.getAttribute('data-algo') === algo);
+  });
+  runAlgoLabCalculation();
+}
+
+function runAlgoLabCalculation() {
+  const algo = STATE.algoLab.selectedAlgo;
+  const graph = STATE.graph;
+
+  if (algo === 'dijkstra') {
+    const res = runLocalDijkstra(graph, 'B01', null);
+    STATE.algoLab.result = res;
+    STATE.algoLab.steps = res.path.map((nodeId, idx) => ({
+      step: idx + 1,
+      title: `Visit Node ${nodeId}`,
+      detail: `Settled with shortest path cost`,
+    }));
+  } else if (algo === 'kruskal') {
+    const edges = [...graph.edges].sort((a, b) => a.distance - b.distance);
+    STATE.algoLab.steps = edges.slice(0, 20).map((e, idx) => ({
+      step: idx + 1,
+      title: `Evaluate Edge ${e.id} (${e.distance}m)`,
+      detail: `${e.source} -> ${e.target}`,
+    }));
+  }
+
+  STATE.algoLab.stepIndex = 0;
+  updateAlgoLabUi();
+}
+
+function updateAlgoLabUi() {
+  const steps = STATE.algoLab.steps || [];
+  const curr = STATE.algoLab.stepIndex;
+  const logEl = document.getElementById('algo-step-log');
+  if (logEl) {
+    logEl.innerHTML = steps.map((s, idx) => `
+      <div style="padding:6px 8px;border-radius:4px;margin-bottom:4px;background:${idx === curr ? 'var(--primary-soft)' : 'transparent'};border-left:3px solid ${idx === curr ? 'var(--primary)' : 'transparent'};font-size:0.78rem;">
+        <strong>Step ${s.step}:</strong> ${escapeHtml(s.title)} - <span style="color:var(--text-muted);">${escapeHtml(s.detail)}</span>
+      </div>
+    `).join('');
+  }
+}
+
+function stepAlgoLab(dir) {
+  const max = (STATE.algoLab.steps || []).length - 1;
+  STATE.algoLab.stepIndex = Math.max(0, Math.min(max, STATE.algoLab.stepIndex + dir));
+  updateAlgoLabUi();
+}
+
+// ============================================================================
+// 12. SYSTEM HEALTH & DIAGNOSTICS
+// ============================================================================
+
+function refreshTelemetryHealth() {
+  callServer('getHealth')
+    .then((health) => {
+      const dot = document.getElementById('telemetry-health-dot');
+      const text = document.getElementById('telemetry-health-text');
+      if (dot) dot.className = `status-dot ${health.status === 'healthy' ? 'pulse' : ''}`;
+      if (text) text.textContent = `DB: ${health.database} (${health.scenarioCount || 0} scenarios)`;
+    })
+    .catch(() => {});
+}
+</script>

@@ -41,7 +41,7 @@ export default function EvacuationPlanner() {
       // If live graph just loaded from a fresh GPS lock, switch to live
       setPlannerMode('live');
     }
-  }, [nearbyGraph, location]);
+  }, [nearbyGraph, location, plannerMode]);
 
   const isLive = plannerMode === 'live';
   const hasLiveGraph = Boolean(isLive && nearbyGraph && location);

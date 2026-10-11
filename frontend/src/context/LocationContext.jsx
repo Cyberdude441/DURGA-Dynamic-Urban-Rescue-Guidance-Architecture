@@ -33,7 +33,7 @@ export function LocationProvider({ children }) {
     try {
       const conditions = await loadLiveConditions(nextLocation, graph);
       setLiveConditions(conditions);
-      if (graph) {
+      if (graph && conditions?.hazards && conditions.hazards.length > 0) {
         const hazardGraph = applyLiveHazardsToGraph(graph, conditions.hazards);
         nearbyGraphRef.current = hazardGraph;
         setNearbyGraph(hazardGraph);
@@ -54,10 +54,7 @@ export function LocationProvider({ children }) {
     setStatus('active');
     setError('');
 
-    // 1. Immediately fetch live weather/conditions for these coordinates
-    void refreshLiveConditions(nextLocation, nearbyGraphRef.current);
-
-    // 2. Reverse geocode location
+    // 1. Reverse geocode location only when position shifts significantly
     const locationKey = `${nextLocation.lat.toFixed(4)}:${nextLocation.lon.toFixed(4)}`;
     if (lastReverseGeocodeRef.current !== locationKey) {
       lastReverseGeocodeRef.current = locationKey;
@@ -69,7 +66,7 @@ export function LocationProvider({ children }) {
       }
     }
 
-    // 3. Fetch nearby OpenStreetMap roads if not yet loaded
+    // 2. Fetch nearby OpenStreetMap roads if not yet loaded
     if (!nearbyGraphRef.current) {
       setIsGraphLoading(true);
       setGraphError('');

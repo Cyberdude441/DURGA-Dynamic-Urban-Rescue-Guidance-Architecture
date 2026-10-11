@@ -40,6 +40,11 @@ export default function AlgorithmLab() {
   const [destinationId, setDestinationId] = useState('EX01');
   const { nearbyGraph, address } = useLocationContext();
 
+  // Playback state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x = 300ms, 2x = 150ms, 4x = 75ms
+  const timerRef = useRef(null);
+
   // Active graph (baseline or disaster scenario)
   const currentGraph = useMemo(() => {
     if (selectedScenarioId === 'live_location' && nearbyGraph) {
@@ -60,28 +65,28 @@ export default function AlgorithmLab() {
   );
   const [dijkstraStepIndex, setDijkstraStepIndex] = useState(0);
 
-  const handleRunDijkstra = (src = sourceId, dst = destinationId, graphToUse = currentGraph) => {
+  const handleRunDijkstra = (src = sourceId, dst = destinationId, graphToUse = currentGraph, record = selectedAlgo === 'dijkstra') => {
     setIsPlaying(false);
     if (timerRef.current) clearInterval(timerRef.current);
-    const res = dijkstra(graphToUse, src, dst, { recordSteps: true });
+    const res = dijkstra(graphToUse, src, dst, { recordSteps: record });
     setDijkstraResult(res);
-    setDijkstraStepIndex(res.steps.length > 0 ? res.steps.length - 1 : 0);
+    setDijkstraStepIndex(res.steps?.length > 0 ? res.steps.length - 1 : 0);
   };
 
   // ----------------------------------------------------
   // FLOYD-WARSHALL STATE & EXECUTION
   // ----------------------------------------------------
   const [fwResult, setFwResult] = useState(() =>
-    floydWarshall(URBAN_GRAPH, { bidirectional: true, recordSteps: true })
+    floydWarshall(URBAN_GRAPH, { bidirectional: true, recordSteps: false })
   );
   const [fwStepIndex, setFwStepIndex] = useState(0);
 
-  const handleRunFloydWarshall = (graphToUse = currentGraph) => {
+  const handleRunFloydWarshall = (graphToUse = currentGraph, record = selectedAlgo === 'floyd-warshall') => {
     setIsPlaying(false);
     if (timerRef.current) clearInterval(timerRef.current);
-    const res = floydWarshall(graphToUse, { bidirectional: true, recordSteps: true });
+    const res = floydWarshall(graphToUse, { bidirectional: true, recordSteps: record });
     setFwResult(res);
-    setFwStepIndex(res.steps.length > 0 ? res.steps.length - 1 : 0);
+    setFwStepIndex(res.steps?.length > 0 ? res.steps.length - 1 : 0);
   };
 
   // ----------------------------------------------------
@@ -199,8 +204,8 @@ export default function AlgorithmLab() {
     }
     window.setTimeout(() => {
       startTransition(() => {
-        handleRunDijkstra(sourceId, destinationId, g);
-        handleRunFloydWarshall(g);
+        handleRunDijkstra(sourceId, destinationId, g, selectedAlgo === 'dijkstra');
+        handleRunFloydWarshall(g, selectedAlgo === 'floyd-warshall');
         handleRunGreedy(g, exitCapacities, greedyStrategy, greedyZoneScope, greedyAllowSplitting);
         handleRunKnapsack(g, knapsackResourceType, knapsackCapacity, knapsackZoneScope);
         setMstResult(kruskalMST(g));
@@ -216,13 +221,13 @@ export default function AlgorithmLab() {
     setSourceId(nextSource || '');
     setDestinationId(firstExit?.id || nextSource || '');
     if (nextSource && firstExit) {
-      handleRunDijkstra(nextSource, firstExit.id, nearbyGraph);
-      handleRunFloydWarshall(nearbyGraph);
+      handleRunDijkstra(nextSource, firstExit.id, nearbyGraph, selectedAlgo === 'dijkstra');
+      handleRunFloydWarshall(nearbyGraph, selectedAlgo === 'floyd-warshall');
       handleRunGreedy(nearbyGraph);
       handleRunKnapsack(nearbyGraph);
       setMstResult(kruskalMST(nearbyGraph));
     }
-  }, [nearbyGraph]);
+  }, [nearbyGraph, selectedAlgo]);
 
   // Instant O(L) path reconstruction query from precomputed Floyd-Warshall matrix
   const fwActiveRoute = useMemo(() => {
@@ -286,9 +291,6 @@ export default function AlgorithmLab() {
   // ----------------------------------------------------
   // PLAYBACK CONTROLLER FOR STEP-BY-STEP VISUALIZATION
   // ----------------------------------------------------
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x = 300ms, 2x = 150ms, 4x = 75ms
-  const timerRef = useRef(null);
 
   const activeStepsCount =
     selectedAlgo === 'dijkstra'
@@ -554,7 +556,17 @@ export default function AlgorithmLab() {
           return (
             <div
               key={algo.id}
-              onClick={() => isActive && setSelectedAlgo(algo.id)}
+              onClick={() => {
+                if (!isActive) return;
+                setSelectedAlgo(algo.id);
+                setIsPlaying(false);
+                if (timerRef.current) clearInterval(timerRef.current);
+                if (algo.id === 'floyd-warshall') {
+                  handleRunFloydWarshall(currentGraph, true);
+                } else if (algo.id === 'dijkstra') {
+                  handleRunDijkstra(sourceId, destinationId, currentGraph, true);
+                }
+              }}
               className={`rounded-xl border p-4 transition-all shadow-xs ${
                 isSelected
                   ? 'border-emerald-500 bg-emerald-50/70 ring-1 ring-emerald-500'

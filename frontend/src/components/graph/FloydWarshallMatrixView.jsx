@@ -54,7 +54,7 @@ export default function FloydWarshallMatrixView({
   // Paginated/Sliced subset for performance and readability
   const displayedNodeIds = useMemo(() => {
     if (pageSize === 0 || pageSize >= filteredNodeIds.length) {
-      return filteredNodeIds;
+      return filteredNodeIds.slice(0, 50);
     }
     return filteredNodeIds.slice(0, pageSize);
   }, [filteredNodeIds, pageSize]);

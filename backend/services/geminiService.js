@@ -1,4 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const REQUEST_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS || 20000);

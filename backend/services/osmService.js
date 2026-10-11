@@ -104,6 +104,148 @@ function isMeaningfulName(name) {
 }
 
 /**
+ * Simplifies and contracts degree-2 road geometry chains while preserving
+ * critical facilities, source node, and connected egress components.
+ * Bounding to maxNodes ensures real-time performance and prevents heap bloat.
+ */
+function contractAndBoundGraph(nodes, edges, sourceNodeId, maxNodes = 48) {
+  if (!nodes || nodes.length <= maxNodes) {
+    return { nodes: nodes || [], edges: edges || [] };
+  }
+
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const adj = new Map();
+  nodes.forEach((n) => adj.set(n.id, []));
+  edges.forEach((e) => {
+    adj.get(e.source)?.push(e);
+    adj.get(e.target)?.push({ ...e, source: e.target, target: e.source });
+  });
+
+  const isEssential = (id) => {
+    const n = nodeMap.get(id);
+    if (!n) return false;
+    if (id === sourceNodeId) return true;
+    if (['exit', 'hospital', 'police', 'resource_center'].includes(n.type)) return true;
+    const deg = adj.get(id)?.length || 0;
+    return deg !== 2;
+  };
+
+  const contractedEdges = [];
+  const seenPairs = new Set();
+
+  nodes.forEach((startNode) => {
+    if (!isEssential(startNode.id)) return;
+
+    const neighbors = adj.get(startNode.id) || [];
+    neighbors.forEach((firstEdge) => {
+      let prevId = startNode.id;
+      let currId = firstEdge.target;
+      let totalDistance = firstEdge.distance;
+      let totalTravelTime = firstEdge.travelTime;
+      let highwayType = firstEdge.highway;
+      let roadName = firstEdge.name;
+      const visitedInWalk = new Set([prevId, currId]);
+
+      while (!isEssential(currId) && (adj.get(currId)?.length || 0) === 2) {
+        const nextEdges = (adj.get(currId) || []).filter((e) => e.target !== prevId);
+        if (nextEdges.length === 0) break;
+        const nextEdge = nextEdges[0];
+        if (visitedInWalk.has(nextEdge.target)) break;
+        prevId = currId;
+        currId = nextEdge.target;
+        totalDistance += nextEdge.distance;
+        totalTravelTime += nextEdge.travelTime;
+        visitedInWalk.add(currId);
+      }
+
+      if (isEssential(currId) && currId !== startNode.id) {
+        const pairKey = [startNode.id, currId].sort().join('--');
+        if (!seenPairs.has(pairKey)) {
+          seenPairs.add(pairKey);
+          contractedEdges.push({
+            id: `osm-corridor-${startNode.id}-${currId}`,
+            source: startNode.id,
+            target: currId,
+            distance: Math.round(totalDistance),
+            travelTime: Number(totalTravelTime.toFixed(1)),
+            highway: highwayType,
+            name: roadName,
+            congestion: 0,
+            danger: 0,
+            blocked: false,
+            dataSource: 'OpenStreetMap contracted corridor',
+          });
+        }
+      }
+    });
+  });
+
+  const essentialNodes = nodes.filter((n) => isEssential(n.id));
+
+  // Build adjacency of contracted graph for BFS connected component retention
+  const contractedAdj = new Map();
+  essentialNodes.forEach((n) => contractedAdj.set(n.id, []));
+  contractedEdges.forEach((e) => {
+    contractedAdj.get(e.source)?.push({ target: e.target, edge: e });
+    contractedAdj.get(e.target)?.push({ target: e.source, edge: e });
+  });
+
+  const src = sourceNodeId || essentialNodes[0]?.id;
+  const queue = [src];
+  const retainedNodesSet = new Set([src]);
+  const retainedEdgesSet = new Set();
+
+  while (queue.length > 0 && retainedNodesSet.size < maxNodes) {
+    const current = queue.shift();
+    const neighbors = contractedAdj.get(current) || [];
+    for (const { target, edge } of neighbors) {
+      if (!retainedNodesSet.has(target)) {
+        if (retainedNodesSet.size >= maxNodes) break;
+        retainedNodesSet.add(target);
+        queue.push(target);
+      }
+      if (retainedNodesSet.has(edge.source) && retainedNodesSet.has(edge.target)) {
+        retainedEdgesSet.add(edge.id);
+      }
+    }
+  }
+
+  // Include any remaining edges between retained vertices
+  contractedEdges.forEach((e) => {
+    if (retainedNodesSet.has(e.source) && retainedNodesSet.has(e.target)) {
+      retainedEdgesSet.add(e.id);
+    }
+  });
+
+  let finalNodes = essentialNodes.filter((n) => retainedNodesSet.has(n.id));
+  let finalEdges = contractedEdges.filter((e) => retainedEdgesSet.has(e.id));
+
+  // Ensure at least 3-4 exits are available in the retained component
+  const exitsInGraph = finalNodes.filter((n) => n.type === 'exit');
+  if (exitsInGraph.length < 2) {
+    const candidates = finalNodes
+      .filter((n) => n.id !== src && n.type !== 'hospital' && n.type !== 'police')
+      .sort((a, b) => (b.distanceFromSource || 0) - (a.distanceFromSource || 0))
+      .slice(0, 4);
+
+    const candidateIds = new Set(candidates.map((c) => c.id));
+    finalNodes = finalNodes.map((n) => {
+      if (candidateIds.has(n.id)) {
+        return {
+          ...n,
+          type: 'exit',
+          name: `Evacuation Exit (Boundary Corridor)`,
+          capacity: 4000,
+        };
+      }
+      return n;
+    });
+  }
+
+  return { nodes: finalNodes, edges: finalEdges };
+}
+
+/**
  * Builds normalized graph from Overpass elements.
  * Generates natural human-readable names without exposing raw node IDs.
  */
@@ -303,10 +445,14 @@ function buildNormalizedGraph(elements, sourcePoint, radiusMeters) {
 
   // 6. Identify Source Node (closest road node to user's live GPS)
   const sourceNode = nearestRoadNode(sourcePoint, normalizedNodes);
+  const sourceNodeId = sourceNode?.id || normalizedNodes[0]?.id || null;
+
+  // 7. Topological Road Simplification & Connected Component Bounding
+  const simplified = contractAndBoundGraph(normalizedNodes, edgeList, sourceNodeId, 48);
 
   return {
-    nodes: normalizedNodes,
-    edges: edgeList,
+    nodes: simplified.nodes,
+    edges: simplified.edges,
     facilities: facilities.map((f) => ({
       name: f.name,
       type: f.type,
@@ -320,8 +466,8 @@ function buildNormalizedGraph(elements, sourcePoint, radiusMeters) {
       x: sourceNode?.x || 400,
       y: sourceNode?.y || 340,
     },
-    sourceNodeId: sourceNode?.id || normalizedNodes[0]?.id || null,
-    dataSource: 'OpenStreetMap via Overpass API',
+    sourceNodeId: sourceNodeId,
+    dataSource: 'OpenStreetMap via Overpass API (topologically simplified)',
     dataFreshness: new Date().toISOString(),
     radiusMeters,
     trafficDataAvailable: false,

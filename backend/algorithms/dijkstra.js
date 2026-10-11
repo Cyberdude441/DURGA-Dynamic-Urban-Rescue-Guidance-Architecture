@@ -272,7 +272,7 @@ export function dijkstra(graph, source, destination, options = {}) {
         previousEdge[target] = edgeId;
         pq.push(target, candidateDist);
 
-        if (recordSteps) {
+        if (recordSteps && steps.length < 150) {
           steps.push({
             stepIndex: steps.length,
             type: 'relax',

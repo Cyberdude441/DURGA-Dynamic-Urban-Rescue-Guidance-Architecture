@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Ambulance,
   ShieldCheck,
@@ -24,11 +24,11 @@ export default function ResourceOptimizer() {
   const [capacity, setCapacity] = useState(24);
   const [zoneScope, setZoneScope] = useState('zones_only');
 
-  const computeResult = (rType = resourceType, cap = capacity, scope = zoneScope) => {
+  const computeResult = useCallback((rType = resourceType, cap = capacity, scope = zoneScope, graphToUse = activeGraph) => {
     const targetZones =
       scope === 'zones_only'
-        ? activeGraph.nodes.filter((n) => n.type === 'evacuation_zone')
-        : activeGraph.nodes.filter(
+        ? (graphToUse?.nodes || []).filter((n) => n.type === 'evacuation_zone')
+        : (graphToUse?.nodes || []).filter(
             (n) => n.type === 'evacuation_zone' || (n.type === 'building' && n.people > 0)
           );
 
@@ -37,13 +37,13 @@ export default function ResourceOptimizer() {
       resourceType: rType,
       capacity: cap,
     });
-  };
+  }, [activeGraph, capacity, resourceType, zoneScope]);
 
-  const [result, setResult] = useState(() => computeResult('ambulances', 24, 'zones_only'));
+  const [result, setResult] = useState(() => computeResult('ambulances', 24, 'zones_only', URBAN_GRAPH));
 
   useEffect(() => {
-    if (nearbyGraph) setResult(computeResult(resourceType, capacity, zoneScope));
-  }, [nearbyGraph]);
+    if (nearbyGraph) setResult(computeResult(resourceType, capacity, zoneScope, nearbyGraph));
+  }, [nearbyGraph, computeResult, resourceType, capacity, zoneScope]);
 
   const handleRunOptimizer = (rType = resourceType, cap = capacity, scope = zoneScope) => {
     const res = computeResult(rType, cap, scope);

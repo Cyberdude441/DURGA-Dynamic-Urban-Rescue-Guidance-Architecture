@@ -19,7 +19,6 @@ export default function AppRoutes() {
         <Route path="simulator" element={<EmergencySimulator />} />
         <Route path="graph-explorer" element={<GraphExplorer />} />
         <Route path="algorithm-lab" element={<AlgorithmLab />} />
-        <Route path="algorithm-labis" element={<AlgorithmLab />} />
         <Route path="evacuation-planner" element={<EvacuationPlanner />} />
         <Route path="resource-optimizer" element={<ResourceOptimizer />} />
         <Route path="analytics" element={<Analytics />} />

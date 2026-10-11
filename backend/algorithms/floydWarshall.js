@@ -154,6 +154,8 @@ export function floydWarshall(graph, options = {}) {
 
   const steps = [];
   let edgesProcessed = 0;
+  const shouldSaveSnapshots = recordSteps && n <= 50;
+  const stepSamplingInterval = recordSteps && n > 60 ? Math.ceil(n / 50) : 1;
 
   // Record initial state snapshot before relaxation
   if (recordSteps) {
@@ -164,7 +166,7 @@ export function floydWarshall(graph, options = {}) {
       pivotNode: null,
       improvementsCount: 0,
       sampleImprovements: [],
-      matrixSnapshot: distMatrix.map((row) => [...row]),
+      matrixSnapshot: shouldSaveSnapshots ? distMatrix.map((row) => [...row]) : null,
       description: `Initialized ${n}x${n} base distance and next-hop matrix with direct corridor adjacencies.`,
     });
   }
@@ -211,7 +213,7 @@ export function floydWarshall(graph, options = {}) {
       }
     }
 
-    if (recordSteps) {
+    if (recordSteps && (k % stepSamplingInterval === 0 || k === n - 1 || stepImprovements > 0)) {
       steps.push({
         stepIndex: steps.length,
         k,
@@ -219,7 +221,7 @@ export function floydWarshall(graph, options = {}) {
         pivotNode,
         improvementsCount: stepImprovements,
         sampleImprovements,
-        matrixSnapshot: distMatrix.map((row) => [...row]),
+        matrixSnapshot: shouldSaveSnapshots ? distMatrix.map((row) => [...row]) : null,
         description:
           stepImprovements > 0
             ? `Iteration k=${k} (Pivot: ${pivotId} - ${pivotNode.name}): Optimized ${stepImprovements} path pairs via ${pivotId}.`
