@@ -84,11 +84,15 @@ async function runAllTests() {
   assert(simResult.greedyResult !== undefined, 'Greedy evacuation results present');
   assert(simResult.greedyResult.assignments.length > 0, `Greedy generated ${simResult.greedyResult.assignments.length} zone assignments`);
   assert(simResult.greedyResult.exitSummary.EX03.assigned === 0, 'Unavailable exit EX03 received 0 evacuees');
+  assert(simResult.greedyResult.exitSummary.EX01.assigned > 0, `Active exit EX01 received real evacuees (${simResult.greedyResult.exitSummary.EX01.assigned})`);
+  assert(simResult.greedyResult.exitSummary.EX01.totalCapacity === 5000, 'Exit EX01 total capacity preserved (5000)');
 
   // Verify DP Resource Optimizer (0/1 Knapsack)
   assert(simResult.knapsackResults !== undefined, 'DP Knapsack results present');
   assert(simResult.knapsackResults.ambulances.resourceUsed <= 20, 'Ambulance usage within 20 unit cap');
   assert(simResult.knapsackResults.ambulances.maxBenefit > 0, `Ambulance optimization positive benefit (${simResult.knapsackResults.ambulances.maxBenefit})`);
+  assert(simResult.knapsackResults.ambulances.selectedZones.length > 0, 'Ambulances selected at least 1 zone');
+  assert(typeof simResult.knapsackResults.ambulances.selectedZones[0].weight === 'number', 'Knapsack item weight is a valid number');
   assert(simResult.knapsackResults.rescueTeams.resourceUsed <= 15, 'Rescue squads within 15 unit cap');
   assert(simResult.knapsackResults.emergencyVehicles.resourceUsed <= 12, 'Emergency vehicles within 12 unit cap');
 
@@ -96,6 +100,9 @@ async function runAllTests() {
   assert(simResult.kruskalResult !== undefined, 'Kruskal MST result present');
   assert(simResult.primResult !== undefined, 'Prim MST result present');
   assert(simResult.kruskalResult.selectedCount > 0, `Kruskal spanned backbone (${simResult.kruskalResult.selectedCount} edges)`);
+  assert(Array.isArray(simResult.kruskalResult.mstEdges), 'Kruskal mstEdges alias array is present');
+  assert(simResult.kruskalResult.mstEdges.length === simResult.kruskalResult.selectedCount, 'Kruskal mstEdges matches selectedCount');
+  assert(Array.isArray(simResult.primResult.mstEdges), 'Prim mstEdges alias array is present');
   assert(simResult.primResult.selectedCount > 0, `Prim spanned backbone (${simResult.primResult.selectedCount} edges)`);
 
   // Verify Evacuation Plan

@@ -166,8 +166,8 @@ export async function runEmergencySimulation(baseGraph, config, onProgress = nul
       const src = updatedNodes.find((n) => n.id === edge.source);
       const tgt = updatedNodes.find((n) => n.id === edge.target);
 
-      const midX = (src?.x ?? 0) + (tgt?.x ?? 0) / 2;
-      const midY = (src?.y ?? 0) + (tgt?.y ?? 0) / 2;
+      const midX = ((src?.x ?? 0) + (tgt?.x ?? 0)) / 2;
+      const midY = ((src?.y ?? 0) + (tgt?.y ?? 0)) / 2;
       const dist = Math.hypot(midX - epicenterX, midY - epicenterY);
 
       let danger = edge.danger || 0;
@@ -345,23 +345,40 @@ export async function runEmergencySimulation(baseGraph, config, onProgress = nul
       },
     });
 
-    // Ensure all configured exits are populated in exitSummary
-    if (!greedyOutput.exitSummary) {
-      greedyOutput.exitSummary = {};
+    // Normalize exitSummary into a structured map with both array and object compatibility
+    const exitSummaryMap = {};
+    if (Array.isArray(greedyOutput.exitSummary)) {
+      greedyOutput.exitSummary.forEach((item) => {
+        exitSummaryMap[item.id] = {
+          ...item,
+          assigned: item.usedCapacity,
+          totalCapacity: item.initialCapacity,
+          available: exitAvailability[item.id]?.available !== false,
+        };
+      });
+    } else if (greedyOutput.exitSummary && typeof greedyOutput.exitSummary === 'object') {
+      Object.assign(exitSummaryMap, greedyOutput.exitSummary);
     }
+
     Object.keys(exitAvailability).forEach((exId) => {
-      if (!greedyOutput.exitSummary[exId]) {
-        greedyOutput.exitSummary[exId] = {
+      if (!exitSummaryMap[exId]) {
+        exitSummaryMap[exId] = {
+          id: exId,
           name: exId,
           totalCapacity: exitAvailability[exId]?.capacity || 0,
+          initialCapacity: exitAvailability[exId]?.capacity || 0,
           usedCapacity: 0,
           remainingCapacity: exitAvailability[exId]?.capacity || 0,
           assigned: 0,
+          assignedPeopleTotal: 0,
+          assignedZones: [],
           utilizationPercent: 0,
           available: exitAvailability[exId]?.available !== false,
         };
       }
     });
+
+    greedyOutput.exitSummary = exitSummaryMap;
 
     return greedyOutput;
   });

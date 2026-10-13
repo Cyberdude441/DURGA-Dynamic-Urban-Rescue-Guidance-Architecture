@@ -3,7 +3,7 @@
  * Connects frontend to the PostgreSQL Express backend via Prisma ORM.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.VITE_API_BASE_URL ? `${import.meta.env.VITE_API_BASE_URL}/api` : 'http://localhost:5000/api');
 
 /**
  * Check backend and PostgreSQL database connectivity

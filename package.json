@@ -1,0 +1,38 @@
+{
+  "name": "durga-architecture",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DURGA - Dynamic Urban Rescue & Guidance Architecture",
+  "scripts": {
+    "test": "node test_dijkstra.js && node test_floyd_warshall.js && node test_greedy_evacuation.js && node test_knapsack_optimizer.js && node test_mst.js && node test_emergency_simulator.js && node test_analytics_engine.js && node test_postgres_api.js && node test_integrations.js",
+    "test:dijkstra": "node test_dijkstra.js",
+    "test:fw": "node test_floyd_warshall.js",
+    "test:greedy": "node test_greedy_evacuation.js",
+    "test:knapsack": "node test_knapsack_optimizer.js",
+    "test:mst": "node test_mst.js",
+    "test:simulator": "node test_emergency_simulator.js",
+    "test:analytics": "node test_analytics_engine.js",
+    "test:postgres": "node test_postgres_api.js",
+    "test:integrations": "node test_integrations.js",
+    "lint": "npm --prefix frontend run lint",
+    "build": "npm --prefix frontend run build",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend dev",
+    "db:seed": "npm --prefix backend run db:seed",
+    "db:migrate": "npm --prefix backend run db:migrate"
+  },
+  "keywords": [
+    "daa",
+    "algorithms",
+    "disaster-management",
+    "dijkstra",
+    "floyd-warshall",
+    "kruskal",
+    "prim",
+    "knapsack",
+    "greedy"
+  ],
+  "author": "DURGA Team",
+  "license": "MIT"
+}

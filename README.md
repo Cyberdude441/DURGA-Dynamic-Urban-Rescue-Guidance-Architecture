@@ -100,7 +100,7 @@ All algorithms are implemented from scratch in pure ES6 JavaScript in both `back
   - **Prisma ORM 6** (type-safe database client, schema migrations, seeders)
 - **Code Quality & Testing**:
   - **Oxlint** (blazing fast linter: 0 errors, 0 warnings across 43 frontend modules)
-  - **Automated Verification Suites** (7 test suites, 260 / 260 tests passing, 100% success rate)
+  - **Automated Verification Suites** (9 test suites, 316 / 316 tests passing, 100% success rate)
 
 ---
 
@@ -149,13 +149,16 @@ DURGA Dynamic Urban Rescue & Guidance Architecture/
 │   │   ├── utils/                # Graph analytics, math formulas, constants
 │   │   └── index.css             # Tailwind base + @media print layout
 │   └── package.json
-├── test_postgres_api.js          # PostgreSQL CRUD & Transaction test suite (43/43)
-├── test_analytics_engine.js      # Benchmark & Empirical Scaling test suite (26/26)
-├── test_emergency_simulator.js   # 12-Stage Pipeline verification suite (33/33)
-├── test_floyd_warshall.js        # Floyd-Warshall verification suite (32/32)
-├── test_greedy_evacuation.js     # Greedy Evacuation verification suite (56/56)
-├── test_knapsack_optimizer.js    # 0/1 Knapsack DP verification suite (23/23)
+├── package.json                  # Root npm workspace & unified execution script
+├── test_dijkstra.js              # Dijkstra Min-Heap Shortest Path suite (32/32)
+├── test_floyd_warshall.js        # Floyd-Warshall All-Pairs DP suite (32/32)
+├── test_greedy_evacuation.js     # Greedy Evacuation Capacity suite (56/56)
+├── test_knapsack_optimizer.js    # 0/1 Knapsack DP Resource Allocation suite (23/23)
 ├── test_mst.js                   # Kruskal & Prim MST verification suite (47/47)
+├── test_emergency_simulator.js   # 12-Stage Pipeline verification suite (40/40)
+├── test_analytics_engine.js      # Benchmark & Empirical Scaling test suite (26/26)
+├── test_postgres_api.js          # PostgreSQL CRUD & Transaction test suite (43/43)
+├── test_integrations.js          # Integrations, Weather & AI Telemetry suite (17/17)
 └── README.md
 ```
 
@@ -255,18 +258,23 @@ npm run db:seed
 ```
 
 ### Step 4: Run Automated Test Verification
-Run the 7 test suites covering all 260 unit and integration assertions:
+Run all 9 test suites covering all 316 unit, algorithm, and integration assertions:
 ```bash
-cd ..
-node test_postgres_api.js
-node test_analytics_engine.js
-node test_emergency_simulator.js
+# Unified command:
+npm test
+
+# Or individually:
+node test_dijkstra.js
 node test_floyd_warshall.js
 node test_greedy_evacuation.js
 node test_knapsack_optimizer.js
 node test_mst.js
+node test_emergency_simulator.js
+node test_analytics_engine.js
+node test_postgres_api.js
+node test_integrations.js
 ```
-*Expected Output: `260 / 260 PASSED (100% SUCCESS)`*
+*Expected Output: `316 / 316 PASSED (100% SUCCESS)`*
 
 ### Step 5: Start the Servers
 In terminal 1 (Backend API):

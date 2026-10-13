@@ -1626,8 +1626,15 @@ export default function EmergencySimulator() {
                 <div className="space-y-4">
                   {/* Exit Capacity Utilization Cards */}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {Object.entries(simulationResult.greedyResult.exitSummary).map(([exId, summary]) => {
-                      const util = summary.utilizationPercent || 0;
+                    {(Array.isArray(simulationResult.greedyResult.exitSummary)
+                      ? simulationResult.greedyResult.exitSummary.map((item) => [item.id || item.name, item])
+                      : Object.entries(simulationResult.greedyResult.exitSummary || {})
+                    ).map(([exId, summary]) => {
+                      const util = summary?.utilizationPercent || 0;
+                      const assignedCount = summary?.assigned ?? summary?.usedCapacity ?? summary?.assignedPeopleTotal ?? 0;
+                      const totalCap = summary?.totalCapacity ?? summary?.initialCapacity ?? 0;
+                      const remCap = summary?.remainingCapacity ?? Math.max(0, totalCap - assignedCount);
+                      const isAvail = summary?.available !== false;
                       return (
                         <div
                           key={exId}
@@ -1636,31 +1643,31 @@ export default function EmergencySimulator() {
                           <div className="flex items-center justify-between font-mono text-xs">
                             <span className="font-bold text-slate-900 flex items-center gap-1.5">
                               <DoorOpen className="h-4 w-4 text-emerald-700" />
-                              {exId}
+                              {summary?.name || exId}
                             </span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                              summary.available
+                              isAvail
                                 ? util > 90
                                   ? 'bg-rose-50 text-rose-800 border-rose-200'
                                   : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                                 : 'bg-slate-100 text-slate-600 border-slate-200'
                             }`}>
-                              {summary.available ? `${util}% FULL` : 'OFFLINE'}
+                              {isAvail ? `${util}% FULL` : 'OFFLINE'}
                             </span>
                           </div>
 
                           <div className="space-y-1">
                             <div className="flex justify-between text-[11px] font-mono text-slate-500">
                               <span>Assigned Civilians:</span>
-                              <strong className="text-slate-900 font-bold">{summary.assigned.toLocaleString()}</strong>
+                              <strong className="text-slate-900 font-bold">{assignedCount.toLocaleString()}</strong>
                             </div>
                             <div className="flex justify-between text-[11px] font-mono text-slate-500">
                               <span>Total Capacity:</span>
-                              <strong className="text-slate-600">{summary.totalCapacity.toLocaleString()}</strong>
+                              <strong className="text-slate-600">{totalCap.toLocaleString()}</strong>
                             </div>
                             <div className="flex justify-between text-[11px] font-mono text-slate-500">
                               <span>Remaining Margin:</span>
-                              <strong className="text-emerald-700 font-bold">{summary.remainingCapacity.toLocaleString()}</strong>
+                              <strong className="text-emerald-700 font-bold">{remCap.toLocaleString()}</strong>
                             </div>
                           </div>
 
@@ -1705,36 +1712,43 @@ export default function EmergencySimulator() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs">
-                          {simulationResult.greedyResult.assignments.map((asg, idx) => (
-                            <tr key={`${asg.zoneId}-${idx}`} className="hover:bg-slate-50/70">
-                              <td className="py-2.5 px-3 font-bold text-slate-900">
-                                {asg.zoneId} <span className="text-[11px] font-normal text-slate-500">({asg.zoneName})</span>
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-900 font-bold">
-                                {asg.evacuees.toLocaleString()}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                  asg.riskLevel === 'CRITICAL'
-                                    ? 'bg-rose-50 text-rose-800 border-rose-200'
-                                    : asg.riskLevel === 'HIGH'
-                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                    : 'bg-slate-100 text-slate-700 border-slate-200'
-                                }`}>
-                                  {asg.riskLevel}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 font-bold text-emerald-800">
-                                {asg.exitId} ({asg.exitName})
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-700">
-                                {asg.effectiveDistance.toFixed(1)}s
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-500">
-                                {asg.remainingExitCapacity.toLocaleString()} slots
-                              </td>
-                            </tr>
-                          ))}
+                          {simulationResult.greedyResult.assignments.map((asg, idx) => {
+                            const evacueesCount = asg.evacuees ?? asg.assignedPeople ?? asg.people ?? 0;
+                            const exitIdLabel = asg.exitId ?? asg.assignedExitId ?? 'EX01';
+                            const exitNameLabel = asg.exitName ?? asg.assignedExitName ?? exitIdLabel;
+                            const effDist = asg.effectiveDistance ?? asg.distance ?? 0;
+                            const remainingCap = asg.remainingExitCapacity ?? asg.exitRemainingCapacityAfter ?? 0;
+                            return (
+                              <tr key={`${asg.zoneId}-${idx}`} className="hover:bg-slate-50/70">
+                                <td className="py-2.5 px-3 font-bold text-slate-900">
+                                  {asg.zoneId} <span className="text-[11px] font-normal text-slate-500">({asg.zoneName})</span>
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-900 font-bold">
+                                  {evacueesCount.toLocaleString()}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                    asg.riskLevel === 'CRITICAL'
+                                      ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                      : asg.riskLevel === 'HIGH'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                      : 'bg-slate-100 text-slate-700 border-slate-200'
+                                  }`}>
+                                    {asg.riskLevel}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 font-bold text-emerald-800">
+                                  {exitIdLabel} ({exitNameLabel})
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-700">
+                                  {typeof effDist === 'number' && isFinite(effDist) ? `${effDist.toFixed(1)}s` : '∞'}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-500">
+                                  {remainingCap.toLocaleString()} slots
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1778,7 +1792,7 @@ export default function EmergencySimulator() {
                         <div className="flex flex-wrap gap-1">
                           {simulationResult.knapsackResults.ambulances.selectedZones.map((z) => (
                             <span key={z.id} className="rounded bg-rose-50 border border-rose-200 px-1.5 py-0.5 text-rose-800 text-[10px] font-bold">
-                              {z.id} ({z.requirement}u)
+                              {z.id} ({z.weight ?? z.requirement ?? 1}u)
                             </span>
                           ))}
                         </div>
@@ -1817,7 +1831,7 @@ export default function EmergencySimulator() {
                         <div className="flex flex-wrap gap-1">
                           {simulationResult.knapsackResults.rescueTeams.selectedZones.map((z) => (
                             <span key={z.id} className="rounded bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-emerald-800 text-[10px] font-bold">
-                              {z.id} ({z.requirement}s)
+                              {z.id} ({z.weight ?? z.requirement ?? 1}s)
                             </span>
                           ))}
                         </div>
@@ -1856,7 +1870,7 @@ export default function EmergencySimulator() {
                         <div className="flex flex-wrap gap-1">
                           {simulationResult.knapsackResults.emergencyVehicles.selectedZones.map((z) => (
                             <span key={z.id} className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-amber-800 text-[10px] font-bold">
-                              {z.id} ({z.requirement}u)
+                              {z.id} ({z.weight ?? z.requirement ?? 1}u)
                             </span>
                           ))}
                         </div>
@@ -1956,7 +1970,7 @@ export default function EmergencySimulator() {
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-                      {simulationResult.kruskalResult.mstEdges.map((e) => (
+                      {(simulationResult.kruskalResult.mstEdges || simulationResult.kruskalResult.selectedEdges || []).map((e) => (
                         <div
                           key={e.id}
                           className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-mono text-slate-700 flex items-center gap-2"

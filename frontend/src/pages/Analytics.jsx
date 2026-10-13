@@ -200,11 +200,11 @@ export default function Analytics() {
             <DoorOpen className="h-4 w-4 text-amber-600" />
           </div>
           <div className="mt-2 text-xl font-bold font-mono text-amber-800">
-            {analyticsData?.zoneEvacMetrics
-              ? `${(analyticsData.zoneEvacMetrics.reduce((s, z) => s + z.evacuationTravelTime, 0) / 5).toFixed(1)} s`
+            {analyticsData?.zoneEvacMetrics && analyticsData.zoneEvacMetrics.length > 0
+              ? `${(analyticsData.zoneEvacMetrics.reduce((s, z) => s + z.evacuationTravelTime, 0) / analyticsData.zoneEvacMetrics.length).toFixed(1)} s`
               : '--'}
           </div>
-          <div className="mt-0.5 text-[10px] font-mono text-slate-500">5 Evacuation Zones</div>
+          <div className="mt-0.5 text-[10px] font-mono text-slate-500">{analyticsData?.zoneEvacMetrics?.length || 5} Evacuation Zones</div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">

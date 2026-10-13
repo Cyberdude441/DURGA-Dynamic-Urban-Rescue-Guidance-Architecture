@@ -370,6 +370,7 @@ export function primMST(graph, options = {}) {
     totalCost: Number(totalCost.toFixed(2)),
     totalDistance: Number(totalDistance.toFixed(2)),
     selectedEdges,
+    mstEdges: selectedEdges,
     rejectedEdges,
     selectedEdgeIds: Array.from(selectedEdgeIds),
     rejectedEdgeIds: Array.from(rejectedEdgeIds),

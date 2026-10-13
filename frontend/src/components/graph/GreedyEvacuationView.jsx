@@ -248,8 +248,8 @@ export default function GreedyEvacuationView({
       {/* 2. EXIT CAPACITY UTILIZATION METERS                 */}
       {/* ---------------------------------------------------- */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {exitSummary.map((exit) => {
-          const utilPct = exit.utilizationPercent;
+        {(Array.isArray(exitSummary) ? exitSummary : Object.values(exitSummary || {})).map((exit) => {
+          const utilPct = exit.utilizationPercent || 0;
           return (
             <div
               key={exit.id}

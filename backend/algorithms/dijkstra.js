@@ -235,7 +235,7 @@ export function dijkstra(graph, source, destination, options = {}) {
     visitedSet.add(current);
     unvisitedSet.delete(current);
 
-    if (recordSteps) {
+    if (recordSteps && steps.length < 150) {
       steps.push({
         stepIndex: steps.length,
         type: 'visit',

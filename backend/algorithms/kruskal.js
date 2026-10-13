@@ -320,6 +320,7 @@ export function kruskalMST(graph, options = {}) {
     totalCost: Number(totalCost.toFixed(2)),
     totalDistance: Number(totalDistance.toFixed(2)),
     selectedEdges,
+    mstEdges: selectedEdges,
     rejectedEdges,
     selectedEdgeIds: selectedEdges.map((e) => e.id),
     rejectedEdgeIds: rejectedEdges.map((e) => e.id),
